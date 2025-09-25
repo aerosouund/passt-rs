@@ -1,0 +1,16 @@
+{
+  "editor.formatOnSave": true,
+  // auto-organize imports
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "always" // <- use always, not explicit
+  },
+  // Rust analyzer settings
+  "rust-analyzer.completion.autoimport.enable": true,
+  "rust-analyzer.imports.granularity.group": "module", // "module" = more granular, less glob
+  "rust-analyzer.imports.group.enable": true,
+  "rust-analyzer.imports.merge.glob": true, // merge glob imports
+  "rust-analyzer.diagnostics.enable": true,
+  "rust-analyzer.cargo.autoreload": true,
+  "rust-analyzer.imports.prefix": "plain",
+  "rust-analyzer.procMacro.enable": true
+}

@@ -1,0 +1,9 @@
+[package]
+name = "libpasst"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libc = "0.2"
+mio = { version = "0.8", features = ["os-poll", "net"] }
+pnet = "0.35.0"
