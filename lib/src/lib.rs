@@ -1,7 +1,10 @@
 use libc::in_addr;
 use mio::net::UnixStream;
+use nix::sys::socket::{recv, MsgFlags};
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
+use std::os::fd::RawFd;
+use tokio::sync::mpsc::Sender;
 
 pub const MAX_FRAME: usize = 65535 + 4;
 
@@ -9,7 +12,8 @@ pub const MAX_FRAME: usize = 65535 + 4;
 pub struct Context {
     pub debug: i32,
     pub trace: i32,
-    pub stream: Option<UnixStream>, // <- optional
+    pub stream: Option<UnixStream>,
+    pub stream_fd: RawFd,
     pub partial_tap_frame: Vec<u8>,
 }
 
@@ -26,17 +30,18 @@ impl Context {
 
 pub struct PartialFrame(pub Vec<u8>);
 
-pub fn handle_packets<'a>(packets: Vec<EthernetPacket<'a>>) {
-    for p in packets.iter() {
+pub async fn handle_packets(
+    tx: Sender<EthernetPacket<'static>>,
+    packets: &mut Vec<EthernetPacket<'static>>,
+) {
+    for p in packets.drain(..) {
         if p.get_ethertype() == Arp {
-            // handle arp
-            handle_arp(p);
+            tx.send(p).await;
             continue;
         };
     }
 }
 
-pub fn handle_arp<'a>(p: &EthernetPacket<'a>) {}
 #[derive(Clone, Copy)]
 pub struct EpollRef(pub usize);
 
@@ -77,4 +82,29 @@ pub struct Ip4Ctx {
 
     pub no_copy_routes: bool,
     pub no_copy_addrs: bool,
+}
+
+pub fn recv_nonblock(fd: RawFd, buf: &mut [u8], offest: usize) -> nix::Result<usize> {
+    loop {
+        match recv(fd, &mut buf[offest..], MsgFlags::MSG_DONTWAIT) {
+            Ok(n) => return Ok(n),
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+pub extern "C" fn exit_handler(signum: libc::c_int) {
+    unsafe {
+        libc::exit(signum);
+    }
+}
+
+pub unsafe fn setup_sig_handler(handler: usize, signal: libc::c_int) {
+    let mut sa: libc::sigaction = std::mem::zeroed();
+
+    sa.sa_sigaction = handler as usize;
+    sa.sa_flags = 0;
+
+    libc::sigemptyset(&mut sa.sa_mask as *mut libc::sigset_t);
+    libc::sigaction(signal, &sa, std::ptr::null_mut());
 }

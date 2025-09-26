@@ -115,7 +115,9 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "mio 0.8.11",
+ "nix",
  "pnet",
+ "tokio",
 ]
 
 [[package]]
