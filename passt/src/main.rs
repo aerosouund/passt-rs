@@ -5,13 +5,15 @@ use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
+use std::error;
 use std::io::{self};
 use std::net::Shutdown;
+use std::os::fd::RawFd;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 use pnet::packet::arp::ArpPacket;
-use pnet::packet::Packet;
+use pnet::packet::{self, Packet};
 use std::io::Write;
 use tokio::sync::mpsc;
 
@@ -34,7 +36,6 @@ async fn main() -> io::Result<()> {
     let mut events = Events::with_capacity(16);
     // ammar: channel length
     let (tx, mut rx) = mpsc::channel::<EthernetPacket<'static>>(100);
-    let mut tx_shutdown = Some(tx.clone());
 
     tokio::spawn(async move {
         // should wait on this before it declares it unready
@@ -74,26 +75,15 @@ async fn main() -> io::Result<()> {
                     ctx.stream = Some(stream);
                 }
                 10 => {
-                    let mut buf = [0u8; MAX_FRAME];
-                    let mut v4_packets: Vec<EthernetPacket<'static>> = Vec::new();
-                    let mut offset = 0;
-                    if ctx.partial_tap_frame.len() > 0 {
-                        buf.clone_from_slice(&ctx.partial_tap_frame);
-                        offset += ctx.partial_tap_frame.len();
-                    }
-                    let n = recv_nonblock(ctx.stream_fd.as_raw_fd(), &mut buf, offset).unwrap();
-                    while n > 4 {
-                        let l2len =
-                            usize::from_be_bytes(buf[offset..offset + 4].try_into().unwrap());
-                        if l2len > MAX_FRAME {
-                            drop(tx_shutdown.take());
+                    let mut v4_packets = Vec::new();
+                    match handle_tap_ethernet(ctx.stream_fd, &mut ctx.partial_tap_frame) {
+                        Ok((packets, partial_frame)) => {
+                            ctx.partial_tap_frame = partial_frame;
+                            v4_packets = packets;
                         }
-                        offset += 4;
-                        let packet = EthernetPacket::owned(buf[offset..l2len].to_vec()).unwrap();
-                        v4_packets.push(packet);
-                        offset += l2len;
-                        if l2len > buf[offset..].len() {
-                            ctx.partial_tap_frame.clone_from_slice(&mut buf[offset..]);
+                        Err(e) => {
+                            error!("error receicing ethernet packages {e}");
+                            drop(tx.clone());
                         }
                     }
                     handle_packets(tx.clone(), &mut v4_packets).await;
@@ -102,4 +92,44 @@ async fn main() -> io::Result<()> {
             }
         }
     }
+}
+
+fn handle_tap_ethernet(
+    stream_fd: RawFd,
+    partial_tap_frame: &mut Vec<u8>,
+) -> Result<(Vec<EthernetPacket<'static>>, Vec<u8>), io::Error> {
+    let mut buf = [0u8; MAX_FRAME];
+    let mut v4_packets: Vec<EthernetPacket<'static>> = Vec::new();
+    let mut offset = 0;
+    if partial_tap_frame.len() > 0 {
+        buf.clone_from_slice(&partial_tap_frame);
+        offset += partial_tap_frame.len();
+    }
+    let mut n = recv_nonblock(stream_fd, &mut buf, offset).unwrap();
+
+    while n > 4 {
+        let packet_size: [u8; 8] = buf[offset..offset + 4].try_into().map_err(|e| {
+            error!("failed to parse packet size {e}");
+            io::Error::new(io::ErrorKind::InvalidData, "failed to parse packet size")
+        })?;
+        let l2len = usize::from_be_bytes(packet_size);
+        if l2len > MAX_FRAME {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Frame too large",
+            ));
+        }
+        offset += 4;
+        n -= 4;
+        if let Some(packet) = EthernetPacket::owned(buf[offset..l2len].to_vec()).take() {
+            v4_packets.push(packet);
+        };
+
+        offset += l2len;
+        if l2len > buf[offset..].len() {
+            partial_tap_frame.clone_from_slice(&mut buf[offset..]);
+        }
+        n -= l2len;
+    }
+    Ok((v4_packets, partial_tap_frame.to_vec()))
 }
