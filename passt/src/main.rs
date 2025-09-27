@@ -5,7 +5,6 @@ use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
-use std::error;
 use std::io::{self};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
@@ -13,7 +12,7 @@ use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 use pnet::packet::arp::ArpPacket;
-use pnet::packet::{self, Packet};
+use pnet::packet::Packet;
 use std::io::Write;
 use tokio::sync::mpsc;
 
@@ -64,7 +63,6 @@ async fn main() -> io::Result<()> {
             match typ {
                 32 => {
                     let (mut stream, _) = listener.accept().unwrap();
-
                     let socket_ep_ref = EpollRef::new(stream.as_raw_fd(), 10);
                     poll.registry().register(
                         &mut stream,
