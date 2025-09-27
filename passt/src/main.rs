@@ -124,10 +124,10 @@ fn handle_tap_ethernet(
         };
 
         offset += l2len;
+        n -= l2len;
         if l2len > buf[offset..].len() {
             partial_tap_frame.clone_from_slice(&mut buf[offset..]);
         }
-        n -= l2len;
     }
     Ok((v4_packets, partial_tap_frame.to_vec()))
 }
