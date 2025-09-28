@@ -6,11 +6,11 @@ use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
+use std::cell::Cell;
 use std::io::{self};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
 use std::os::unix::io::AsRawFd;
-use std::thread;
 use std::time::Duration;
 
 use pnet::packet::arp::ArpPacket;
@@ -54,7 +54,7 @@ async fn main() -> io::Result<()> {
                 break;
             }
             info!("the stream is not ready yet, sleeping for two seconds");
-            thread::sleep(Duration::from_secs(2));
+            tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
         }
 
@@ -92,7 +92,7 @@ async fn main() -> io::Result<()> {
                     ctx.stream = Some(stream);
                 }
                 10 => {
-                    let mut v4_packets = Vec::new();
+                    let mut v4_packets: Vec<EthernetPacket<'static>>;
                     match handle_tap_ethernet(ctx.stream_fd, &mut ctx.partial_tap_frame) {
                         Ok((packets, partial_frame)) => {
                             ctx.partial_tap_frame = partial_frame;
@@ -100,14 +100,15 @@ async fn main() -> io::Result<()> {
                         }
                         Err(e) => {
                             error!("error receicing ethernet packages {e}");
-                            drop(tx.clone());
+                            break;
                         }
                     }
-                    handle_packets(tx.clone(), &mut v4_packets).await;
+                    handle_packets(&tx, &mut v4_packets).await;
                 }
                 _ => {}
             }
         }
+        // find an error to drop tx if the function returns an error
     }
 }
 
@@ -138,7 +139,7 @@ fn handle_tap_ethernet(
         }
         offset += 4;
         n -= 4;
-        if let Some(packet) = EthernetPacket::owned(buf[offset..l2len].to_vec()).take() {
+        if let Some(packet) = EthernetPacket::owned(buf[offset..offset + l2len].to_vec()).take() {
             v4_packets.push(packet);
         };
 

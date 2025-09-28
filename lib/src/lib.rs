@@ -31,7 +31,7 @@ impl Context {
 pub struct PartialFrame(pub Vec<u8>);
 
 pub async fn handle_packets(
-    tx: Sender<EthernetPacket<'static>>,
+    tx: &Sender<EthernetPacket<'static>>,
     packets: &mut Vec<EthernetPacket<'static>>,
 ) {
     for p in packets.drain(..) {
