@@ -11,3 +11,4 @@ nix = { version = "0.30", features = ["event", "socket"]}
 pnet = "0.35.0"
 log = "0.4"
 mio = { version = "0.8", features = ["os-poll", "net"] }
+clap = { version = "4", features = ["derive"] }

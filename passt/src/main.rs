@@ -1,7 +1,8 @@
 #![allow(non_upper_case_globals)]
+use clap::Parser;
 use libpasst::*;
-use log::error;
-use mio::net::UnixListener;
+use log::{error, info};
+use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
@@ -9,12 +10,21 @@ use std::io::{self};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
 use std::os::unix::io::AsRawFd;
+use std::thread;
 use std::time::Duration;
 
 use pnet::packet::arp::ArpPacket;
 use pnet::packet::Packet;
 use std::io::Write;
 use tokio::sync::mpsc;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Args {
+    /// Socket path for Unix domain socket
+    #[arg(short = 's', long = "socket-path", default_value = "/tmp/my_socket")]
+    socket_path: String,
+}
 
 // ammar: test after arp
 #[tokio::main]
@@ -23,9 +33,9 @@ async fn main() -> io::Result<()> {
         setup_sig_handler(exit_handler as usize, libc::SIGTERM);
         setup_sig_handler(exit_handler as usize, libc::SIGQUIT);
     }
+    let args = Args::parse();
     let mut ctx = Context::new();
-    // ammar: turn into a flag
-    let socket_path = "/tmp/my_socket";
+    let socket_path = args.socket_path.as_str();
     let _ = std::fs::remove_file(socket_path);
     let mut listener = UnixListener::bind(socket_path)?;
     let mut poll = Poll::new()?;
@@ -33,17 +43,26 @@ async fn main() -> io::Result<()> {
     poll.registry()
         .register(&mut listener, Token(tap_ev.0), Interest::READABLE)?;
     let mut events = Events::with_capacity(16);
-    // ammar: channel length
     let (tx, mut rx) = mpsc::channel::<EthernetPacket<'static>>(100);
 
     tokio::spawn(async move {
         // should wait on this before it declares it unready
-        let mut stream = ctx.stream.as_ref().expect("");
+        let mut stream: &UnixStream;
+        loop {
+            if let Some(s) = ctx.stream.as_ref() {
+                stream = s;
+                break;
+            }
+            info!("the stream is not ready yet, sleeping for two seconds");
+            thread::sleep(Duration::from_secs(2));
+            continue;
+        }
+
         while let Some(packet) = rx.recv().await {
             match packet.get_ethertype() {
                 Arp => {
                     let arp_packet = ArpPacket::new(packet.payload()).unwrap();
-                    if let Err(e) = stream.write(arp_packet.packet()) {};
+                    if let Err(e) = stream.write(arp_packet.packet()) {}; // handle this
                 }
                 _ => {}
             }
