@@ -1,12 +1,12 @@
 #![allow(non_upper_case_globals)]
 use clap::Parser;
 use libpasst::*;
-use log::{error, info};
+use log::{debug, error, info};
 use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
-use std::cell::Cell;
+
 use std::io::{self};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
@@ -61,8 +61,13 @@ async fn main() -> io::Result<()> {
         while let Some(packet) = rx.recv().await {
             match packet.get_ethertype() {
                 Arp => {
-                    let arp_packet = ArpPacket::new(packet.payload()).unwrap();
-                    if let Err(e) = stream.write(arp_packet.packet()) {}; // handle this
+                    if let Some(arp_packet) = ArpPacket::new(packet.payload()) {
+                        if let Err(e) = stream.write(arp_packet.packet()) {
+                            error!("error writing packet {e}");
+                            continue;
+                        };
+                        debug!("wrote packet");
+                    };
                 }
                 _ => {}
             }
