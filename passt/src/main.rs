@@ -46,7 +46,6 @@ async fn main() -> io::Result<()> {
     let (tx, mut rx) = mpsc::channel::<EthernetPacket<'static>>(100);
 
     tokio::spawn(async move {
-        // should wait on this before it declares it unready
         let mut stream: &UnixStream;
         loop {
             if let Some(s) = ctx.stream.as_ref() {
@@ -113,7 +112,7 @@ async fn main() -> io::Result<()> {
                 _ => {}
             }
         }
-        // find an error to drop tx if the function returns an error
+        // find a way to drop tx if the function returns an error
     }
 }
 

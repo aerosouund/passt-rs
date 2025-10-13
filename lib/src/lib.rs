@@ -1,8 +1,15 @@
 use libc::in_addr;
 use mio::net::UnixStream;
 use nix::sys::socket::{recv, MsgFlags};
+use pnet::packet::arp;
+use pnet::packet::arp::Arp;
+use pnet::packet::arp::ArpOperation;
+use pnet::packet::arp::ArpPacket;
+use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::Packet;
+use std::net::Ipv4Addr;
 use std::os::fd::RawFd;
 use tokio::sync::mpsc::Sender;
 
@@ -36,10 +43,36 @@ pub async fn handle_packets(
 ) {
     for p in packets.drain(..) {
         if p.get_ethertype() == Arp {
-            tx.send(p).await;
-            continue;
+            if let Some(final_packet) = handle_arp_packet(&mut p.packet().to_vec()) {
+                match tx.send(final_packet).await {
+                    Ok(()) => {}
+                    Err(e) => {}
+                }
+            }
         };
     }
+}
+
+fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static>> {
+    let mut arp_packet = MutableArpPacket::new(packet_data.as_mut_slice()).unwrap();
+    if arp_packet.get_sender_proto_addr() == arp_packet.get_target_proto_addr() {
+        return None;
+    }
+
+    // swap sender and target ip
+    let sender_ip = arp_packet.get_sender_proto_addr();
+    let target_tp = arp_packet.get_target_proto_addr();
+    arp_packet.set_target_proto_addr(sender_ip);
+    arp_packet.set_sender_proto_addr(target_tp);
+
+    // set the target mac address to the sender's mac address
+    arp_packet.set_target_hw_addr(arp_packet.get_sender_hw_addr());
+
+    // set operation to a reply
+    arp_packet.set_operation(ArpOperation(2));
+
+    let final_packet = EthernetPacket::owned(arp_packet.packet().to_vec()).unwrap();
+    Some(final_packet)
 }
 
 #[derive(Clone, Copy)]
