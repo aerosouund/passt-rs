@@ -1,15 +1,11 @@
 use libc::in_addr;
 use mio::net::UnixStream;
 use nix::sys::socket::{recv, MsgFlags};
-use pnet::packet::arp;
-use pnet::packet::arp::Arp;
 use pnet::packet::arp::ArpOperation;
-use pnet::packet::arp::ArpPacket;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::Packet;
-use std::net::Ipv4Addr;
 use std::os::fd::RawFd;
 use tokio::sync::mpsc::Sender;
 
