@@ -222,6 +222,7 @@ name = "libpasst"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "log",
  "mio 0.8.11",
  "nix",
  "pnet",

@@ -1,22 +1,16 @@
 #![allow(non_upper_case_globals)]
 use clap::Parser;
-use libpasst::*;
+use libpasst::muxer::{ConnEnum, Muxer, StreamConnCtx};
+use libpasst::{exit_handler, handle_packets, setup_sig_handler, MAX_FRAME};
 use log::{debug, error, info};
-use mio::net::{UnixListener, UnixStream};
+use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
-use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
+use std::io::Read;
 
 use std::io::{self};
-use std::net::Shutdown;
-use std::os::fd::RawFd;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
-
-use pnet::packet::arp::ArpPacket;
-use pnet::packet::Packet;
-use std::io::Write;
-use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -26,88 +20,53 @@ struct Args {
     socket_path: String,
 }
 
-// ammar: test after arp
-#[tokio::main]
-async fn main() -> io::Result<()> {
+fn main() -> io::Result<()> {
     unsafe {
         setup_sig_handler(exit_handler as usize, libc::SIGTERM);
         setup_sig_handler(exit_handler as usize, libc::SIGQUIT);
     }
     let args = Args::parse();
-    let mut ctx = Context::new();
+    let mut muxer = Muxer::new();
     let socket_path = args.socket_path.as_str();
     let _ = std::fs::remove_file(socket_path);
-    let mut listener = UnixListener::bind(socket_path)?;
+
+    let mut listener = UnixListener::bind(socket_path)?; // do we need the mio socket listener ?
+
     let mut poll = Poll::new()?;
-    let tap_ev = EpollRef::new(listener.as_raw_fd(), 32);
     poll.registry()
-        .register(&mut listener, Token(tap_ev.0), Interest::READABLE)?;
+        .register(&mut listener, Token(0), Interest::READABLE)?;
+
+    muxer
+        .conn_map
+        .insert(Token(0), ConnEnum::SocketListener(listener));
+
     let mut events = Events::with_capacity(16);
-    let (tx, mut rx) = mpsc::channel::<EthernetPacket<'static>>(100);
-
-    tokio::spawn(async move {
-        let mut stream: &UnixStream;
-        loop {
-            if let Some(s) = ctx.stream.as_ref() {
-                stream = s;
-                break;
-            }
-            info!("the stream is not ready yet, sleeping for two seconds");
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            continue;
-        }
-
-        while let Some(packet) = rx.recv().await {
-            match packet.get_ethertype() {
-                Arp => {
-                    if let Some(arp_packet) = ArpPacket::new(packet.payload()) {
-                        if let Err(e) = stream.write(arp_packet.packet()) {
-                            error!("error writing packet {e}");
-                            continue;
-                        };
-                        debug!("wrote packet");
-                    };
-                }
-                _ => {}
-            }
-        }
-        match stream.shutdown(Shutdown::Both) {
-            Ok(()) => {}
-            Err(e) => {
-                error!("error shutting down stream {e}");
-            }
-        };
-    });
-
     loop {
         poll.poll(&mut events, Some(Duration::from_secs(5)))?;
         for ev in events.iter() {
-            let (_, typ) = EpollRef::from_u64(usize::from(ev.token())).unpack();
-            match typ {
-                32 => {
-                    let (mut stream, _) = listener.accept().unwrap();
-                    let socket_ep_ref = EpollRef::new(stream.as_raw_fd(), 10);
-                    poll.registry().register(
-                        &mut stream,
-                        Token(socket_ep_ref.0),
-                        Interest::READABLE,
-                    )?;
-                    ctx.stream_fd = stream.as_raw_fd();
-                    ctx.stream = Some(stream);
+            match muxer.conn_map.get_mut(&ev.token()) {
+                Some(ConnEnum::SocketListener(listener_stream)) => {
+                    let (mut stream, _) = listener_stream.accept().unwrap();
+                    let stream_fd = stream.as_raw_fd() as usize;
+                    poll.registry()
+                        .register(&mut stream, Token(stream_fd), Interest::READABLE)?;
+                    muxer.conn_map.insert(
+                        Token(stream_fd),
+                        ConnEnum::Stream(StreamConnCtx {
+                            stream,
+                            partial_frame: Vec::new(),
+                        }),
+                    );
                 }
-                10 => {
-                    let mut v4_packets: Vec<EthernetPacket<'static>>;
-                    match handle_tap_ethernet(ctx.stream_fd, &mut ctx.partial_tap_frame) {
-                        Ok((packets, partial_frame)) => {
-                            ctx.partial_tap_frame = partial_frame;
-                            v4_packets = packets;
-                        }
-                        Err(e) => {
-                            error!("error receicing ethernet packages {e}");
-                            break;
-                        }
+                Some(ConnEnum::Stream(ref mut stream_ctx)) => {
+                    handle_tap_ethernet(stream_ctx)
+                        .and_then(|mut packets| handle_packets(stream_ctx.stream(), &mut packets))
+                        .unwrap_or_else(|e| error!("{}", e.to_string()));
+
+                    if let Err(e) = handle_tap_ethernet(stream_ctx) {
+                        error!("{}", e.to_string());
+                        continue;
                     }
-                    handle_packets(&tx, &mut v4_packets).await;
                 }
                 _ => {}
             }
@@ -116,18 +75,15 @@ async fn main() -> io::Result<()> {
     }
 }
 
-fn handle_tap_ethernet(
-    stream_fd: RawFd,
-    partial_tap_frame: &mut Vec<u8>,
-) -> Result<(Vec<EthernetPacket<'static>>, Vec<u8>), io::Error> {
+fn handle_tap_ethernet(ctx: &mut StreamConnCtx) -> Result<Vec<EthernetPacket<'static>>, io::Error> {
     let mut buf = [0u8; MAX_FRAME];
     let mut v4_packets: Vec<EthernetPacket<'static>> = Vec::new();
     let mut offset = 0;
-    if partial_tap_frame.len() > 0 {
-        buf.clone_from_slice(&partial_tap_frame);
-        offset += partial_tap_frame.len();
+    if ctx.partial_frame.len() > 0 {
+        buf.clone_from_slice(ctx.partial_frame());
+        offset += ctx.partial_frame.len();
     }
-    let mut n = recv_nonblock(stream_fd, &mut buf, offset).unwrap();
+    let mut n = ctx.stream.read(&mut buf[offset..])?;
 
     while n > 4 {
         let packet_size: [u8; 8] = buf[offset..offset + 4].try_into().map_err(|e| {
@@ -150,8 +106,8 @@ fn handle_tap_ethernet(
         offset += l2len;
         n -= l2len;
         if l2len > buf[offset..].len() {
-            partial_tap_frame.clone_from_slice(&mut buf[offset..]);
+            ctx.partial_frame.clone_from_slice(&buf[offset..]);
         }
     }
-    Ok((v4_packets, partial_tap_frame.to_vec()))
+    Ok(v4_packets)
 }

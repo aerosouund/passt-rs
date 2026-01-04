@@ -1,15 +1,19 @@
 use libc::in_addr;
+use log::{debug, error, info};
 use mio::net::UnixStream;
-use nix::sys::socket::{recv, MsgFlags};
 use pnet::packet::arp::ArpOperation;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ipv4::Ipv4;
 use pnet::packet::Packet;
+use std::io;
+use std::io::Write;
 use std::os::fd::RawFd;
-use tokio::sync::mpsc::Sender;
 
 pub const MAX_FRAME: usize = 65535 + 4;
+
+pub mod muxer;
 
 #[derive(Default)]
 pub struct Context {
@@ -33,20 +37,24 @@ impl Context {
 
 pub struct PartialFrame(pub Vec<u8>);
 
-pub async fn handle_packets(
-    tx: &Sender<EthernetPacket<'static>>,
+#[allow(non_upper_case_globals)]
+pub fn handle_packets(
+    stream: &mut UnixStream,
     packets: &mut Vec<EthernetPacket<'static>>,
-) {
+) -> Result<(), io::Error> {
     for p in packets.drain(..) {
-        if p.get_ethertype() == Arp {
-            if let Some(final_packet) = handle_arp_packet(&mut p.packet().to_vec()) {
-                match tx.send(final_packet).await {
-                    Ok(()) => {}
-                    Err(e) => {}
-                }
+        match p.get_ethertype() {
+            Arp => {
+                if let Some(final_packet) = handle_arp_packet(&mut p.packet().to_vec()) {
+                    if let Err(e) = stream.write(final_packet.packet()) {
+                        error!("{}", e.to_string())
+                    }
+                };
             }
-        };
+            Ipv4 => {}
+        }
     }
+    Ok(())
 }
 
 fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static>> {
@@ -113,25 +121,18 @@ pub struct Ip4Ctx {
     pub no_copy_addrs: bool,
 }
 
-pub fn recv_nonblock(fd: RawFd, buf: &mut [u8], offest: usize) -> nix::Result<usize> {
-    loop {
-        match recv(fd, &mut buf[offest..], MsgFlags::MSG_DONTWAIT) {
-            Ok(n) => return Ok(n),
-            Err(e) => return Err(e),
-        }
-    }
-}
-
 pub extern "C" fn exit_handler(signum: libc::c_int) {
     unsafe {
         libc::exit(signum);
     }
 }
 
+// SAFETY: This is safe to call because all it does is setup signal interrupts
+#[allow(clippy::missing_safety_doc)]
 pub unsafe fn setup_sig_handler(handler: usize, signal: libc::c_int) {
     let mut sa: libc::sigaction = std::mem::zeroed();
 
-    sa.sa_sigaction = handler as usize;
+    sa.sa_sigaction = handler;
     sa.sa_flags = 0;
 
     libc::sigemptyset(&mut sa.sa_mask as *mut libc::sigset_t);
