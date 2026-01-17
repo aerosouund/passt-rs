@@ -1,4 +1,4 @@
-use libc::in_addr;
+use flow::{flow_initiate_af, Flow, FlowType, Flowside, PifType, FLOWATSIDX, FLOWS};
 use log::{debug, error, info};
 use mio::net::UnixStream;
 use muxer::StreamConnCtx;
@@ -6,14 +6,21 @@ use pnet::packet::arp::ArpOperation;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes::Arp;
 use pnet::packet::ethernet::EthernetPacket;
-use pnet::packet::ipv4::Ipv4;
+use pnet::packet::icmp::{IcmpPacket, IcmpType};
+use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
+use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
 use std::io;
 use std::io::{Read, Write};
+
+use std::net::Ipv4Addr;
 use std::os::fd::RawFd;
+
+use crate::flow::StateIdx;
 
 pub const MAX_FRAME: usize = 65535 + 4;
 
+pub mod flow;
 pub mod muxer;
 
 #[derive(Default)]
@@ -52,11 +59,127 @@ pub fn handle_packets(
                     }
                 };
             }
-            Ipv4 => {}
+
+            Ipv4 => {
+                if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
+                    match v4packet.get_next_level_protocol() {
+                        IpNextHeaderProtocols::Icmp => {
+                            // should a table of flows and a table of indexes
+                            // build the flowside from the icmp packet data
+                            // i need to store the source and dest ips before turning it to an icmp packet
+                            let src = v4packet.get_source();
+                            let dest = v4packet.get_destination();
+                            let icmp_packet =
+                                IcmpPacket::owned(v4packet.payload().to_owned()).unwrap();
+
+                            // is there a constant type i can compare with instead of this ?
+                            if icmp_packet.get_icmp_type() != IcmpType::new(8) {
+                                continue;
+                            }
+
+                            // SAFETY: we know that its an echo because we checked above
+                            // so ID is certainly there
+                            let arr =
+                                unsafe { *(icmp_packet.payload().as_ptr() as *const [u8; 4]) };
+
+                            let id = u16::from_be_bytes([arr[0], arr[1]]);
+
+                            let flowside = Flowside::new(src, dest, id, id);
+                            // make this a global
+                            // get the sidx (the flow table index) from the flowside
+                            if let Some(sidx) = FLOWATSIDX.get(&flowside) {
+                                let f = unsafe { FLOWS.flows[sidx.flow_table_idx as usize] };
+                                // nil check for f or flow init
+                                new_icmp_flow(src, dest, id, id);
+                            }
+
+                            // check if the flow matches the flowside structrue we built in address and port, no port in icmp ?
+                            // we use the id field in the icmp header for src/dst port
+                            // then we need to turn the packet to an icmp packet?
+                        }
+                        IpNextHeaderProtocols::Tcp => {}
+                        _ => {}
+                    }
+                }
+                // should contain handling of ipv4 protos. icmp, tcp, udp.. etc
+                //
+            }
         }
     }
     Ok(())
 }
+
+fn new_icmp_flow(src: Ipv4Addr, dest: Ipv4Addr, srcport: u16, destport: u16) {
+    // stupid ass asserts
+    //
+    let nextfree = unsafe { FLOWS.next_free.clone() };
+    let mut f = unsafe { FLOWS.flows[FLOWS.next_free] };
+    let mut ini_f = flow_initiate_af(&mut f, src, dest, srcport, destport, PifType::Host);
+
+    match f.flow_common.pif[0] {
+        PifType::Tap => {
+            // fwd_nat_from_tap
+            let target_pif = fwd_nat_from_tap(
+                IpNextHeaderProtocols::Icmp,
+                &mut ini_f,
+                &mut f.side[1],
+                srcport,
+                destport,
+            );
+            f.flow_common.pif[1] = target_pif
+        }
+        PifType::Host => {
+            // fwd_nat_from_host
+        }
+        PifType::Splice => {
+            // fwd_nat_from_splice
+        }
+        _ => {}
+    }
+    if f.flow_common.pif[1] != PifType::Host {
+        // error
+    }
+    f.flow_common.flow_type = FlowType::Ping;
+    // initiaite flow sidx
+    let sidx = StateIdx {
+        sidei: 1,
+        flow_table_idx: nextfree,
+    };
+    FLOWATSIDX.insert(f.side[1], sidx);
+
+    // call l4 socket stuff ?
+}
+// ctx ?
+fn fwd_nat_from_tap(
+    proto: IpNextHeaderProtocol,
+    ini: &mut Flowside,
+    tgt: &mut Flowside,
+    srcport: u16,
+    destport: u16,
+) -> PifType {
+    // if dns ?
+    if (proto == IpNextHeaderProtocols::Udp || proto == IpNextHeaderProtocols::Tcp) && srcport == 53
+    {
+        // handle dns
+    }
+
+    // from ini, check if its 4 or 6, loopback or an ip
+    if ini.src.is_loopback() {
+        ini.dest = Ipv4Addr::LOCALHOST
+    } else if ini.src.is_unspecified() {
+        tgt.dest = Ipv4Addr::UNSPECIFIED
+    } else {
+        tgt.dest = ini.src
+    }
+    tgt.destport = ini.srcport;
+    // there was a condition on ipv4 here, since we are doing 4 only then by default its true
+    tgt.src = Ipv4Addr::UNSPECIFIED;
+
+    PifType::Host
+}
+
+// should i wrap it in an ethernet packet like i did with arp ?
+// fn build_ipv4_packet(packet_data: &mut Vec<u8>) -> Option<Ipv4<'static>> {}
 
 fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static>> {
     let mut arp_packet = MutableArpPacket::new(packet_data.as_mut_slice()).unwrap();
@@ -78,48 +201,6 @@ fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static
 
     let final_packet = EthernetPacket::owned(arp_packet.packet().to_vec()).unwrap();
     Some(final_packet)
-}
-
-#[derive(Clone, Copy)]
-pub struct EpollRef(pub usize);
-
-impl EpollRef {
-    pub fn new(fd: i32, typ: u16) -> Self {
-        let mut val = 0u64;
-        val |= (typ as u64) << 48;
-        val |= (fd as u32 as u64);
-        EpollRef(val as usize)
-    }
-
-    pub fn unpack(self) -> (i32, u16) {
-        let fd = (self.0 & 0xFFFF_FFFF) as u32 as i32;
-        let typ = ((self.0 >> 48) & 0xFFFF) as u16;
-        (fd, typ)
-    }
-
-    pub fn from_u64(val: usize) -> Self {
-        EpollRef(val)
-    }
-}
-
-pub struct Ip4Ctx {
-    pub addr: in_addr,
-    pub addr_seen: in_addr,
-    pub prefix_len: in_addr,
-    pub guest_gw: in_addr,
-    pub map_host_loopback: in_addr,
-    pub map_guest_addr: in_addr,
-    pub dns: [in_addr; 4],
-    pub dns_match: in_addr,
-    pub our_tap_addr: in_addr,
-
-    pub dns_host: in_addr,
-    pub addr_out: in_addr,
-
-    pub ifname_out: [u8; 16],
-
-    pub no_copy_routes: bool,
-    pub no_copy_addrs: bool,
 }
 
 pub extern "C" fn exit_handler(signum: libc::c_int) {
