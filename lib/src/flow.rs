@@ -12,9 +12,7 @@ pub enum PifType {
 
 type FlowAtSidx = BTreeMap<Flowside, StateIdx>;
 
-pub const FLOWATSIDX: FlowAtSidx = BTreeMap::new();
-
-// pub hs = std::collections::HashMap::<Flowside, StateIdx>::new();
+pub static mut FLOWATSIDX: FlowAtSidx = BTreeMap::new();
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 pub struct Flowside {
