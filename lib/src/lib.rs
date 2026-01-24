@@ -10,8 +10,11 @@ use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
 use std::collections::HashMap;
+use std::fmt::{self, write};
 use std::io;
 use std::io::{Read, Write};
+
+use crate::icmp::IcmpError;
 
 pub const MAX_FRAME: usize = 65535 + 4;
 
@@ -21,7 +24,22 @@ pub mod icmp;
 pub mod muxer;
 pub mod socket;
 
-pub struct Handler {}
+#[derive(Debug)]
+pub struct HandlePacketError(pub String);
+
+impl std::fmt::Display for HandlePacketError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for HandlePacketError {}
+
+impl From<IcmpError> for HandlePacketError {
+    fn from(value: IcmpError) -> Self {
+        HandlePacketError(value.to_string())
+    }
+}
 
 #[allow(non_upper_case_globals)]
 pub fn handle_packets(
@@ -43,7 +61,8 @@ pub fn handle_packets(
                 if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
                     match v4packet.get_next_level_protocol() {
                         IpNextHeaderProtocols::Icmp => {
-                            icmp::handle_icmp_packet(reg, v4packet);
+                            let _ = icmp::handle_icmp_packet(reg, v4packet)
+                                .map_err(HandlePacketError::from);
                         }
                         IpNextHeaderProtocols::Tcp => {}
                         _ => {}

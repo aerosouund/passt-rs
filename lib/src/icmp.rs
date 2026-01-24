@@ -26,7 +26,7 @@ impl std::fmt::Display for IcmpError {
         match self {
             IcmpError::BindError(e) => write!(
                 f,
-                "Failed to bind to the created icmp socket with statis: {}",
+                "Failed to bind to the created icmp socket with status: {}",
                 e
             ),
             IcmpError::NotEchoError => write!(f, "Packet is not an echo packet"),
