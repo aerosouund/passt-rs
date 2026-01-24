@@ -1,7 +1,7 @@
 use log::{debug, error, info};
 use mio::net::UnixStream;
-use mio::Registry;
-use muxer::StreamConnCtx;
+use mio::{Poll, Registry, Token};
+use muxer::{ConnEnum, StreamConnCtx};
 use pnet::packet::arp::ArpOperation;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes;
@@ -9,6 +9,7 @@ use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
+use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
 
@@ -20,48 +21,40 @@ pub mod icmp;
 pub mod muxer;
 pub mod socket;
 
-pub struct Handler {
-    registry: &'static Registry,
-}
+pub struct Handler {}
 
-impl Handler {
-    pub fn new(reg: &'static Registry) -> Self {
-        Handler { registry: reg }
-    }
+#[allow(non_upper_case_globals)]
+pub fn handle_packets(
+    reg: &Registry,
+    stream: &mut UnixStream,
+    packets: &mut Vec<EthernetPacket<'static>>,
+) -> Result<(), io::Error> {
+    for p in packets.drain(..) {
+        match p.get_ethertype() {
+            EtherTypes::Arp => {
+                if let Some(final_packet) = handle_arp_packet(&mut p.packet().to_vec()) {
+                    if let Err(e) = stream.write(final_packet.packet()) {
+                        error!("{}", e.to_string())
+                    }
+                };
+            }
 
-    #[allow(non_upper_case_globals)]
-    pub fn handle_packets(
-        &self,
-        stream: &mut UnixStream,
-        packets: &mut Vec<EthernetPacket<'static>>,
-    ) -> Result<(), io::Error> {
-        for p in packets.drain(..) {
-            match p.get_ethertype() {
-                EtherTypes::Arp => {
-                    if let Some(final_packet) = handle_arp_packet(&mut p.packet().to_vec()) {
-                        if let Err(e) = stream.write(final_packet.packet()) {
-                            error!("{}", e.to_string())
+            EtherTypes::Ipv4 => {
+                if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
+                    match v4packet.get_next_level_protocol() {
+                        IpNextHeaderProtocols::Icmp => {
+                            icmp::handle_icmp_packet(reg, v4packet);
                         }
-                    };
-                }
-
-                EtherTypes::Ipv4 => {
-                    if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
-                        match v4packet.get_next_level_protocol() {
-                            IpNextHeaderProtocols::Icmp => {
-                                icmp::handle_icmp_packet(self.registry, v4packet);
-                            }
-                            IpNextHeaderProtocols::Tcp => {}
-                            _ => {}
-                        }
+                        IpNextHeaderProtocols::Tcp => {}
+                        _ => {}
                     }
                 }
-
-                _ => {}
             }
+
+            _ => {}
         }
-        Ok(())
     }
+    Ok(())
 }
 
 // should i wrap it in an ethernet packet like i did with arp ?

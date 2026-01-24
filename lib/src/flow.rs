@@ -1,3 +1,4 @@
+use std::sync::RwLock;
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
 #[repr(u32)]
@@ -13,7 +14,7 @@ pub enum PifType {
 
 type FlowAtSidx = BTreeMap<Flowside, StateIdx>;
 
-pub static mut FLOWATSIDX: FlowAtSidx = BTreeMap::new();
+pub static FLOWATSIDX: RwLock<FlowAtSidx> = RwLock::new(BTreeMap::new());
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
 pub struct Flowside {
@@ -121,39 +122,23 @@ impl Flow {
 }
 
 // we need a hash set of stateidx, should be flowmax instead
-type FlowTable = [Flow; 1024];
 
 pub struct FlowAllocator {
     pub next_free: usize,
-    pub flows: FlowTable,
+    pub flows: [Flow; 1024],
 }
 
-pub static mut FLOWS: FlowAllocator = FlowAllocator {
-    next_free: 0,
-    flows: [Flow {
-        // verify that those are the correct flow initiations
-        flow_common: FlowCommon {
-            flow_type: FlowType::None,
-            flow_state: FlowState::Free,
-            pif: [PifType::None; 2],
-        },
-        side: [
-            Flowside {
-                src: Ipv4Addr::new(0, 0, 0, 0),
-                dest: Ipv4Addr::new(0, 0, 0, 0),
-                srcport: 0,
-                destport: 0,
-            },
-            Flowside {
-                src: Ipv4Addr::new(0, 0, 0, 0),
-                dest: Ipv4Addr::new(0, 0, 0, 0),
-                srcport: 0,
-                destport: 0,
-            },
-        ],
-        ping: Ping {},
-    }; 1024],
-};
+impl Default for FlowAllocator {
+    fn default() -> Self {
+        FlowAllocator {
+            next_free: 0,
+            flows: [Flow::default(); 1024],
+        }
+    }
+}
+
+pub static mut FLOWS: std::sync::LazyLock<FlowAllocator> =
+    std::sync::LazyLock::new(FlowAllocator::default);
 
 pub fn flow_initiate_af(
     flow: &mut Flow,

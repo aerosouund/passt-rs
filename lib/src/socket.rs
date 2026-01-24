@@ -35,6 +35,7 @@ pub fn set_socketopt(
     opt_val: i32,
     opt_val_size: usize,
 ) -> io::Result<RawFd> {
+    // should return an error when the setsocketopt returns nonzero
     unsafe {
         libc::setsockopt(
             socket_fd,

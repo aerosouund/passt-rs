@@ -37,7 +37,7 @@ impl std::fmt::Display for IcmpError {
 
 impl std::error::Error for IcmpError {}
 
-pub fn handle_icmp_packet(reg: &'static Registry, v4packet: Ipv4Packet) -> Result<(), IcmpError> {
+pub fn handle_icmp_packet(reg: &Registry, v4packet: Ipv4Packet) -> Result<(), IcmpError> {
     // should a table of flows and a table of indexes
     // build the flowside from the icmp packet data
     // i need to store the source and dest ips before turning it to an icmp packet
@@ -58,8 +58,8 @@ pub fn handle_icmp_packet(reg: &'static Registry, v4packet: Ipv4Packet) -> Resul
 
     let flowside = Flowside::new(src, dest, id, id);
     // get the sidx (the flow table index) from the flowside
-    if let Some(sidx) = unsafe { FLOWATSIDX.get(&flowside) } {
-        let f = unsafe { FLOWS.flows[sidx.flow_table_idx as usize] };
+    if let Some(sidx) = FLOWATSIDX.read().unwrap().get(&flowside) {
+        let f = unsafe { FLOWS.flows[sidx.flow_table_idx] };
         // nil check for f or flow init
         new_icmp_flow(reg, src, dest, id, id)?;
     };
@@ -79,7 +79,7 @@ pub fn new_icmp_flow(
 ) -> Result<(), IcmpError> {
     // stupid ass asserts
     //
-    let nextfree = unsafe { FLOWS.next_free.clone() };
+    let nextfree = unsafe { FLOWS.next_free };
     let mut f = unsafe { FLOWS.flows[FLOWS.next_free] };
     let mut ini_f = flow_initiate_af(&mut f, src, dest, srcport, destport, PifType::Host);
 
@@ -144,9 +144,7 @@ pub fn new_icmp_flow(
     }
 
     // not sure if this insert maps to whats really in the c code
-    unsafe {
-        FLOWATSIDX.insert(f.side[1], sidx);
-    }
+    FLOWATSIDX.write().unwrap().insert(f.side[1], sidx);
 
     let mut s = unsafe { UnixStream::from_std(net::UnixStream::from_raw_fd(fd)) };
 
