@@ -1,11 +1,20 @@
 use std::collections::HashMap;
 
 use mio::net::{UnixListener, UnixStream};
-use mio::Token;
+use mio::{Registry, Token};
 
-#[derive(Default)]
-pub struct Muxer {
+pub struct PasstCtx {
     pub conn_map: HashMap<Token, ConnEnum>,
+    pub registry: &'static Registry,
+}
+
+impl PasstCtx {
+    pub fn new(reg: &'static Registry) -> Self {
+        Self {
+            conn_map: HashMap::new(),
+            registry: reg,
+        }
+    }
 }
 
 pub struct StreamConnCtx {
@@ -19,14 +28,6 @@ impl StreamConnCtx {
     }
     pub fn partial_frame(&mut self) -> &mut Vec<u8> {
         &mut self.partial_frame
-    }
-}
-
-impl Muxer {
-    pub fn new() -> Self {
-        Self {
-            conn_map: HashMap::new(),
-        }
     }
 }
 

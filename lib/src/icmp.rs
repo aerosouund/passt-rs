@@ -1,33 +1,43 @@
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
+use std::os::fd::FromRawFd;
+use std::os::unix::net;
 
+use mio::net::UnixStream;
 use pnet::packet::icmp::{IcmpPacket, IcmpType};
 
 use crate::flow::{flow_initiate_af, FlowType, Flowside, PifType, StateIdx, FLOWATSIDX, FLOWS};
 use crate::fwd::fwd_nat_from_tap;
 use crate::socket::{create_socket, set_socketopt, sockaddr_in_from};
-use std::fmt::{self, write};
+use mio::{Interest, Registry, Token};
+use std::fmt;
 use std::net::Ipv4Addr;
 
 #[derive(Debug)]
-enum IcmpError {
-    BindError(String),
+pub enum IcmpError {
+    BindError(i32),
     NotEchoError,
+    EpollError(String),
 }
 
 impl std::fmt::Display for IcmpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IcmpError::BindError(e) => write!(f, "IO error: {}", e),
+            IcmpError::BindError(e) => write!(
+                f,
+                "Failed to bind to the created icmp socket with statis: {}",
+                e
+            ),
             IcmpError::NotEchoError => write!(f, "Packet is not an echo packet"),
+            IcmpError::EpollError(e) => write!(f, "IO error: {}", e),
         }
     }
 }
 
 impl std::error::Error for IcmpError {}
 
-pub fn handle_icmp_packet(v4packet: Ipv4Packet) -> Result<(), IcmpError> {
+pub fn handle_icmp_packet(reg: &'static Registry, v4packet: Ipv4Packet) -> Result<(), IcmpError> {
     // should a table of flows and a table of indexes
     // build the flowside from the icmp packet data
     // i need to store the source and dest ips before turning it to an icmp packet
@@ -51,7 +61,7 @@ pub fn handle_icmp_packet(v4packet: Ipv4Packet) -> Result<(), IcmpError> {
     if let Some(sidx) = unsafe { FLOWATSIDX.get(&flowside) } {
         let f = unsafe { FLOWS.flows[sidx.flow_table_idx as usize] };
         // nil check for f or flow init
-        new_icmp_flow(src, dest, id, id)?;
+        new_icmp_flow(reg, src, dest, id, id)?;
     };
 
     // check if the flow matches the flowside structrue we built in address and port, no port in icmp ?
@@ -61,6 +71,7 @@ pub fn handle_icmp_packet(v4packet: Ipv4Packet) -> Result<(), IcmpError> {
 }
 
 pub fn new_icmp_flow(
+    registry: &Registry,
     src: Ipv4Addr,
     dest: Ipv4Addr,
     srcport: u16,
@@ -102,12 +113,11 @@ pub fn new_icmp_flow(
     };
 
     // build a socket address from the given data
-
     let socket_addr = sockaddr_in_from(&f.side[1].src, f.side[1].srcport);
     let fd = create_socket(
         libc::AF_INET,
         libc::SOCK_DGRAM,
-        libc::SOCK_NONBLOCK, // is there no sock nonblock on bsd/ios ?
+        libc::SA_NOCLDSTOP, // is there no sock nonblock on bsd/ios ? should be non block
         libc::IPPROTO_ICMP,
     )
     .unwrap();
@@ -129,14 +139,20 @@ pub fn new_icmp_flow(
             std::mem::size_of_val(&socket_addr) as libc::socklen_t,
         )
     };
-    if bind_result < 0 {}
+    if bind_result < 0 {
+        return Err(IcmpError::BindError(bind_result));
+    }
 
     // not sure if this insert maps to whats really in the c code
     unsafe {
         FLOWATSIDX.insert(f.side[1], sidx);
     }
 
-    // call epoll ctl
+    let mut s = unsafe { UnixStream::from_std(net::UnixStream::from_raw_fd(fd)) };
 
+    // call epoll ctl
+    registry
+        .register(&mut s, Token(fd as usize), Interest::READABLE)
+        .map_err(|e| IcmpError::EpollError(e.to_string()))?;
     Ok(())
 }

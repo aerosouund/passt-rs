@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
 #[repr(u32)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PifType {
+    #[default]
     None = 0,
     Host,
     Tap,
@@ -20,6 +21,17 @@ pub struct Flowside {
     pub dest: Ipv4Addr,
     pub srcport: u16,
     pub destport: u16,
+}
+
+impl Default for Flowside {
+    fn default() -> Self {
+        Flowside {
+            src: Ipv4Addr::UNSPECIFIED,
+            dest: Ipv4Addr::UNSPECIFIED,
+            srcport: 0,
+            destport: 0,
+        }
+    }
 }
 
 impl Flowside {
@@ -40,13 +52,14 @@ pub struct StateIdx {
 }
 
 #[derive(Default, Clone, Copy)]
-struct Ping {}
+pub struct Ping {}
 
 impl Ping {}
 
-#[derive(Clone, Copy)]
-enum FlowState {
+#[derive(Default, Clone, Copy)]
+pub enum FlowState {
     Free,
+    #[default]
     New,
     Ini,
     Tgt,
@@ -55,8 +68,9 @@ enum FlowState {
     States,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub enum FlowType {
+    #[default]
     None,
     Tcp,
     TcpSplice,
@@ -65,14 +79,14 @@ pub enum FlowType {
     NumTypes,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct FlowCommon {
     pub flow_type: FlowType,
     pub flow_state: FlowState,
     pub pif: [PifType; 2],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct Flow {
     pub flow_common: FlowCommon,
     pub side: [Flowside; 2],
@@ -109,7 +123,7 @@ impl Flow {
 // we need a hash set of stateidx, should be flowmax instead
 type FlowTable = [Flow; 1024];
 
-struct FlowAllocator {
+pub struct FlowAllocator {
     pub next_free: usize,
     pub flows: FlowTable,
 }
@@ -117,6 +131,12 @@ struct FlowAllocator {
 pub static mut FLOWS: FlowAllocator = FlowAllocator {
     next_free: 0,
     flows: [Flow {
+        // verify that those are the correct flow initiations
+        flow_common: FlowCommon {
+            flow_type: FlowType::None,
+            flow_state: FlowState::Free,
+            pif: [PifType::None; 2],
+        },
         side: [
             Flowside {
                 src: Ipv4Addr::new(0, 0, 0, 0),

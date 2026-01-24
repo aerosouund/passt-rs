@@ -1,7 +1,7 @@
 #![allow(non_upper_case_globals)]
 use clap::Parser;
-use libpasst::muxer::{ConnEnum, Muxer, StreamConnCtx};
-use libpasst::{exit_handler, handle_packets, handle_tap_ethernet, setup_sig_handler};
+use libpasst::muxer::{ConnEnum, Ctx, Muxer};
+use libpasst::{handle_packets, handle_tap_ethernet};
 use log::{debug, error, info};
 use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
@@ -28,11 +28,13 @@ fn main() -> io::Result<()> {
     let socket_path = args.socket_path.as_str();
     let _ = std::fs::remove_file(socket_path);
 
-    let mut listener = UnixListener::bind(socket_path)?; // do we need the mio socket listener ?
+    let mut listener = UnixListener::bind(socket_path)?;
 
     let mut poll = Poll::new()?;
     poll.registry()
         .register(&mut listener, Token(0), Interest::READABLE)?;
+
+    let h = libpasst::Handler::new(poll.registry());
 
     muxer
         .conn_map
@@ -58,7 +60,7 @@ fn main() -> io::Result<()> {
                 }
                 Some(ConnEnum::Stream(ref mut stream_ctx)) => {
                     handle_tap_ethernet(stream_ctx)
-                        .and_then(|mut packets| handle_packets(stream_ctx.stream(), &mut packets))
+                        .and_then(|mut packets| h.handle_packets(stream_ctx.stream(), &mut packets))
                         .unwrap_or_else(|e| error!("{}", e.to_string()));
 
                     if let Err(e) = handle_tap_ethernet(stream_ctx) {
@@ -69,5 +71,22 @@ fn main() -> io::Result<()> {
                 _ => {}
             }
         }
+    }
+}
+
+// SAFETY: This is safe to call because all it does is setup signal interrupts
+unsafe fn setup_sig_handler(handler: usize, signal: libc::c_int) {
+    let mut sa: libc::sigaction = std::mem::zeroed();
+
+    sa.sa_sigaction = handler;
+    sa.sa_flags = 0;
+
+    libc::sigemptyset(&mut sa.sa_mask as *mut libc::sigset_t);
+    libc::sigaction(signal, &sa, std::ptr::null_mut());
+}
+
+pub extern "C" fn exit_handler(signum: libc::c_int) {
+    unsafe {
+        libc::exit(signum);
     }
 }
