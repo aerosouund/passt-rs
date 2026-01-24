@@ -17,6 +17,7 @@ impl StreamConnCtx {
 pub enum ConnEnum {
     SocketListener(UnixListener),
     Stream(StreamConnCtx),
+    // should there be another type that represents a unix stream directly ?
     TcpConn,
     EtherConn,
 }

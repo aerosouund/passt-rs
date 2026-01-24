@@ -1,20 +1,25 @@
-use log::{debug, error, info};
+use dhcproto::Decodable;
+use dhcproto::v4::{Decoder, Message};
+use log::error;
+use mio::Registry;
 use mio::net::UnixStream;
-use mio::{Poll, Registry, Token};
-use muxer::{ConnEnum, StreamConnCtx};
+use muxer::StreamConnCtx;
+use pnet::packet::Packet;
 use pnet::packet::arp::ArpOperation;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::Packet;
+use pnet::packet::udp::UdpPacket;
 use std::collections::HashMap;
-use std::fmt::{self, write};
+use std::fmt;
 use std::io;
 use std::io::{Read, Write};
+use std::sync::{Arc, RwLock};
 
 use crate::icmp::IcmpError;
+use crate::muxer::ConnEnum;
 
 pub const MAX_FRAME: usize = 65535 + 4;
 
@@ -23,6 +28,7 @@ pub mod fwd;
 pub mod icmp;
 pub mod muxer;
 pub mod socket;
+pub mod udp;
 
 #[derive(Debug)]
 pub struct HandlePacketError(pub String);
@@ -46,14 +52,15 @@ pub fn handle_packets(
     reg: &Registry,
     stream: &mut UnixStream,
     packets: &mut Vec<EthernetPacket<'static>>,
+    conn_map: &RwLock<HashMap<mio::Token, ConnEnum>>,
 ) -> Result<(), io::Error> {
     for p in packets.drain(..) {
         match p.get_ethertype() {
             EtherTypes::Arp => {
                 if let Some(final_packet) = handle_arp_packet(&mut p.packet().to_vec()) {
-                    if let Err(e) = stream.write(final_packet.packet()) {
-                        error!("{}", e.to_string())
-                    }
+                    let _ = stream
+                        .write(final_packet.packet())
+                        .map_err(|e| error!("{}", e));
                 };
             }
 
@@ -61,8 +68,18 @@ pub fn handle_packets(
                 if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
                     match v4packet.get_next_level_protocol() {
                         IpNextHeaderProtocols::Icmp => {
-                            let _ = icmp::handle_icmp_packet(reg, v4packet)
+                            let _ = icmp::handle_icmp_packet(reg, v4packet, conn_map)
                                 .map_err(HandlePacketError::from);
+                        }
+                        IpNextHeaderProtocols::Udp => {
+                            let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
+                            // dhcp ? but again, we could send whatever on port 67 but hey
+                            if udp_packet.get_destination() == 67 {
+                                let dhcp_msg =
+                                    Message::decode(&mut Decoder::new(v4packet.payload()));
+                            }
+
+                            // dhcp ?
                         }
                         IpNextHeaderProtocols::Tcp => {}
                         _ => {}

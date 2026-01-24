@@ -1,3 +1,4 @@
+use std::os::fd::RawFd;
 use std::sync::RwLock;
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
@@ -52,12 +53,14 @@ pub struct StateIdx {
     pub flow_table_idx: usize,
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct Ping {}
+#[derive(Default, Clone, Copy, PartialEq)]
+pub struct Ping {
+    pub socket_fd: RawFd,
+}
 
 impl Ping {}
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub enum FlowState {
     Free,
     #[default]
@@ -69,7 +72,7 @@ pub enum FlowState {
     States,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub enum FlowType {
     #[default]
     None,
@@ -80,14 +83,14 @@ pub enum FlowType {
     NumTypes,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub struct FlowCommon {
     pub flow_type: FlowType,
     pub flow_state: FlowState,
     pub pif: [PifType; 2],
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub struct Flow {
     pub flow_common: FlowCommon,
     pub side: [Flowside; 2],
@@ -116,7 +119,7 @@ impl Flow {
                     destport: 0,
                 },
             ],
-            ping: Ping {},
+            ping: Ping::default(),
         }
     }
 }
