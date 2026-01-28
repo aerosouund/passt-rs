@@ -26,7 +26,6 @@ pub mod flow;
 pub mod fwd;
 pub mod icmp;
 pub mod muxer;
-pub mod socket;
 pub mod udp;
 
 #[derive(Debug)]
