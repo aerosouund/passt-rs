@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::io::{Read, Write};
-use std::sync::{Arc, RwLock};
 
 use crate::icmp::IcmpError;
 use crate::muxer::ConnEnum;
@@ -52,8 +51,8 @@ pub fn handle_packets(
     reg: &Registry,
     stream: &mut UnixStream,
     packets: &mut Vec<EthernetPacket<'static>>,
-    conn_map: &RwLock<HashMap<mio::Token, ConnEnum>>,
-) -> Result<(), io::Error> {
+) -> Result<HashMap<mio::Token, ConnEnum>, HandlePacketError> {
+    let mut new_conns = HashMap::new();
     for p in packets.drain(..) {
         match p.get_ethertype() {
             EtherTypes::Arp => {
@@ -68,8 +67,12 @@ pub fn handle_packets(
                 if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
                     match v4packet.get_next_level_protocol() {
                         IpNextHeaderProtocols::Icmp => {
-                            let _ = icmp::handle_icmp_packet(reg, v4packet, conn_map)
-                                .map_err(HandlePacketError::from);
+                            // handle when we return no new connections
+                            if let Some((token, conn)) = icmp::handle_icmp_packet(reg, v4packet)
+                                .map_err(HandlePacketError::from)?
+                            {
+                                new_conns.insert(token, conn);
+                            };
                         }
                         IpNextHeaderProtocols::Udp => {
                             let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
@@ -90,7 +93,7 @@ pub fn handle_packets(
             _ => {}
         }
     }
-    Ok(())
+    Ok(new_conns)
 }
 
 // should i wrap it in an ethernet packet like i did with arp ?

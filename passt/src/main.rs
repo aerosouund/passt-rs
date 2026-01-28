@@ -42,8 +42,13 @@ fn main() -> io::Result<()> {
     loop {
         poll.poll(&mut events, Some(Duration::from_secs(5)))?;
         for ev in events.iter() {
-            match conn_map.get_mut(&ev.token()) {
-                Some(ConnEnum::SocketListener(listener_stream)) => {
+            let mut conn = if let Some(conn) = conn_map.remove(&ev.token()) {
+                conn
+            } else {
+                continue;
+            };
+            match conn {
+                ConnEnum::SocketListener(ref mut listener_stream) => {
                     let (mut stream, _) = listener_stream.accept().unwrap();
                     let stream_fd = stream.as_raw_fd() as usize;
                     poll.registry()
@@ -56,17 +61,21 @@ fn main() -> io::Result<()> {
                         }),
                     );
                 }
-                Some(ConnEnum::Stream(ref mut stream_ctx)) => {
-                    handle_tap_ethernet(stream_ctx)
-                        .and_then(|mut packets| {
-                            handle_packets(poll.registry(), stream_ctx.stream(), &mut packets)
-                        })
-                        .unwrap_or_else(|e| error!("{}", e.to_string()));
-
-                    if let Err(e) = handle_tap_ethernet(stream_ctx) {
-                        error!("{}", e.to_string());
-                        continue;
-                    }
+                ConnEnum::Stream(ref mut stream_ctx) => {
+                    let mut packets = handle_tap_ethernet(stream_ctx)?;
+                    match handle_packets(poll.registry(), stream_ctx.stream(), &mut packets) {
+                        Ok(ref mut conns) => {
+                            for (token, conn) in conns.drain() {
+                                if conn_map.contains_key(&token) {
+                                    continue;
+                                };
+                                conn_map.insert(token, conn);
+                            }
+                        }
+                        Err(e) => {
+                            error!("{}", e);
+                        }
+                    };
                 }
                 _ => {}
             }
