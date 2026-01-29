@@ -12,7 +12,7 @@ use nix::sys::socket::{
 };
 
 use pnet::packet::Packet;
-use pnet::packet::icmp::{IcmpPacket, IcmpType};
+use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 
@@ -68,10 +68,9 @@ pub fn handle_icmp_packet(
     let icmp_packet = IcmpPacket::owned(v4packet.payload().to_owned()).unwrap();
 
     // is there a constant type i can compare with instead of this ?
-    if icmp_packet.get_icmp_type() != IcmpType::new(8) {
+    if icmp_packet.get_icmp_type() != IcmpTypes::EchoRequest {
         return Err(IcmpError::NotEchoError);
     }
-
     // SAFETY: we know that its an echo because we checked above
     // so ID is certainly there
     let arr = unsafe { *(icmp_packet.payload().as_ptr() as *const [u8; 4]) };
@@ -119,15 +118,13 @@ pub fn handle_icmp_packet(
     let addr = SockaddrIn::new(a, b, c, d, 0);
 
     // send packet
-    match sendto(
+    sendto(
         flow.ping.socket_fd,
         v4packet.payload(),
         &addr,
         MsgFlags::MSG_CTRUNC, // should be nosignal
-    ) {
-        Ok(_) => Ok(new_conn),
-        Err(errno) => Err(IcmpError::SendPacketError(errno as usize)),
-    }
+    )?;
+    Ok(new_conn)
 }
 
 // this function should return a pif
