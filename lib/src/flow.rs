@@ -140,7 +140,7 @@ impl Default for FlowAllocator {
     }
 }
 
-pub static mut FLOWS: std::sync::LazyLock<FlowAllocator> =
+pub const FLOWS: std::sync::LazyLock<FlowAllocator> =
     std::sync::LazyLock::new(FlowAllocator::default);
 
 pub fn flow_initiate_af(

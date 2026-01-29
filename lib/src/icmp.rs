@@ -67,7 +67,6 @@ pub fn handle_icmp_packet(
     let dest = v4packet.get_destination();
     let icmp_packet = IcmpPacket::owned(v4packet.payload().to_owned()).unwrap();
 
-    // is there a constant type i can compare with instead of this ?
     if icmp_packet.get_icmp_type() != IcmpTypes::EchoRequest {
         return Err(IcmpError::NotEchoError);
     }
@@ -87,7 +86,7 @@ pub fn handle_icmp_packet(
             .flow_table_idx
     };
 
-    let mut flow = unsafe { FLOWS.flows[sidx] };
+    let mut flow = FLOWS.flows[sidx];
 
     // Will hold return value only if we initialized
     let mut new_conn: Option<(Token, ConnEnum)> = None;
