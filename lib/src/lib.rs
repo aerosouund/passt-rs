@@ -52,7 +52,6 @@ pub fn handle_packets(
     packets: &mut Vec<EthernetPacket<'static>>,
     conn_map: &mut HashMap<mio::Token, ConnEnum>,
 ) -> Result<(), HandlePacketError> {
-    // let mut new_conns = HashMap::new();
     for p in packets.drain(..) {
         match p.get_ethertype() {
             EtherTypes::Arp => {

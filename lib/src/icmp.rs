@@ -1,6 +1,5 @@
 use std::fmt;
 use std::net::Ipv4Addr;
-use std::ops::Deref;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net;
 
@@ -29,7 +28,6 @@ pub enum IcmpError {
     NotEchoError,
     EpollError(String),
     InvalidSidxError,
-    SendPacketError(usize),
 }
 
 impl std::fmt::Display for IcmpError {
@@ -43,9 +41,6 @@ impl std::fmt::Display for IcmpError {
             IcmpError::NotEchoError => write!(f, "Packet is not an echo packet"),
             IcmpError::EpollError(e) => write!(f, "IO error: {}", e),
             IcmpError::InvalidSidxError => write!(f, "invalid state index built from packet"),
-            Self::SendPacketError(errno) => {
-                write!(f, "send to socket errored with number: {}", errno)
-            }
         }
     }
 }
