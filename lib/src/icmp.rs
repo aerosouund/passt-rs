@@ -1,5 +1,6 @@
 use std::fmt;
 use std::net::Ipv4Addr;
+use std::ops::Deref;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net;
 
@@ -86,13 +87,13 @@ pub fn handle_icmp_packet(
             .flow_table_idx
     };
 
-    let mut flow = FLOWS.flows[sidx];
+    let flow = &mut FLOWS.write().unwrap().flows[sidx];
 
     // Will hold return value only if we initialized
     let mut new_conn: Option<(Token, ConnEnum)> = None;
 
     // Initialize flow if needed
-    if flow == Flow::default() {
+    if *flow == Flow::default() {
         let fd = new_icmp_flow(src, dest, id, id)?;
 
         let mut s = unsafe { UnixStream::from_std(net::UnixStream::from_raw_fd(fd)) };
@@ -136,8 +137,8 @@ pub fn new_icmp_flow(
 ) -> Result<RawFd, IcmpError> {
     // stupid ass asserts
     //
-    let nextfree = unsafe { FLOWS.next_free };
-    let mut f = unsafe { FLOWS.flows[FLOWS.next_free] };
+    let nextfree = FLOWS.read().unwrap().next_free;
+    let f = &mut FLOWS.write().unwrap().flows[nextfree];
     let mut ini_f = flow_initiate_af(&mut f, src, dest, srcport, destport, PifType::Host);
 
     match f.flow_common.pif[0] {

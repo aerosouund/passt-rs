@@ -63,19 +63,14 @@ fn main() -> io::Result<()> {
                 }
                 ConnEnum::Stream(ref mut stream_ctx) => {
                     let mut packets = handle_tap_ethernet(stream_ctx)?;
-                    match handle_packets(poll.registry(), stream_ctx.stream(), &mut packets) {
-                        Ok(ref mut conns) => {
-                            for (token, conn) in conns.drain() {
-                                if conn_map.contains_key(&token) {
-                                    continue;
-                                };
-                                conn_map.insert(token, conn);
-                            }
-                        }
-                        Err(e) => {
-                            error!("{}", e);
-                        }
-                    };
+                    if let Err(e) = handle_packets(
+                        poll.registry(),
+                        stream_ctx.stream(),
+                        &mut packets,
+                        &mut conn_map,
+                    ) {
+                        error!("{}", e);
+                    }
                 }
                 _ => {}
             }

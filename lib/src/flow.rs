@@ -1,5 +1,5 @@
 use std::os::fd::RawFd;
-use std::sync::RwLock;
+use std::sync::{LazyLock, RwLock};
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
 #[repr(u32)]
@@ -90,38 +90,11 @@ pub struct FlowCommon {
     pub pif: [PifType; 2],
 }
 
-#[derive(Default, Clone, Copy, PartialEq)]
+#[derive(Default, PartialEq, Clone, Copy)]
 pub struct Flow {
     pub flow_common: FlowCommon,
     pub side: [Flowside; 2],
     pub ping: Ping,
-}
-
-impl Flow {
-    pub fn new() -> Self {
-        Flow {
-            flow_common: FlowCommon {
-                flow_type: FlowType::None,
-                flow_state: FlowState::New,
-                pif: [PifType::None, PifType::None],
-            },
-            side: [
-                Flowside {
-                    src: Ipv4Addr::new(0, 0, 0, 0),
-                    dest: Ipv4Addr::new(0, 0, 0, 0),
-                    srcport: 0,
-                    destport: 0,
-                },
-                Flowside {
-                    src: Ipv4Addr::new(0, 0, 0, 0),
-                    dest: Ipv4Addr::new(0, 0, 0, 0),
-                    srcport: 0,
-                    destport: 0,
-                },
-            ],
-            ping: Ping::default(),
-        }
-    }
 }
 
 // we need a hash set of stateidx, should be flowmax instead
@@ -140,8 +113,8 @@ impl Default for FlowAllocator {
     }
 }
 
-pub const FLOWS: std::sync::LazyLock<FlowAllocator> =
-    std::sync::LazyLock::new(FlowAllocator::default);
+pub static FLOWS: LazyLock<RwLock<FlowAllocator>> =
+    LazyLock::new(|| RwLock::new(FlowAllocator::default()));
 
 pub fn flow_initiate_af(
     flow: &mut Flow,

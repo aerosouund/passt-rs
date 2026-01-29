@@ -50,8 +50,9 @@ pub fn handle_packets(
     reg: &Registry,
     stream: &mut UnixStream,
     packets: &mut Vec<EthernetPacket<'static>>,
-) -> Result<HashMap<mio::Token, ConnEnum>, HandlePacketError> {
-    let mut new_conns = HashMap::new();
+    conn_map: &mut HashMap<mio::Token, ConnEnum>,
+) -> Result<(), HandlePacketError> {
+    // let mut new_conns = HashMap::new();
     for p in packets.drain(..) {
         match p.get_ethertype() {
             EtherTypes::Arp => {
@@ -70,7 +71,7 @@ pub fn handle_packets(
                             if let Some((token, conn)) = icmp::handle_icmp_packet(reg, v4packet)
                                 .map_err(HandlePacketError::from)?
                             {
-                                new_conns.insert(token, conn);
+                                conn_map.insert(token, conn);
                             };
                         }
                         IpNextHeaderProtocols::Udp => {
@@ -92,7 +93,7 @@ pub fn handle_packets(
             _ => {}
         }
     }
-    Ok(new_conns)
+    Ok(())
 }
 
 // should i wrap it in an ethernet packet like i did with arp ?
