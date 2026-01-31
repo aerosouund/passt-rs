@@ -1,4 +1,4 @@
-use crate::conf::Conf;
+use crate::conf::{Conf, Mode};
 use nix::errno::Errno;
 use nix::sys::socket::{ControlMessage, MsgFlags, sendmsg};
 use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
@@ -38,7 +38,7 @@ pub fn tap_udp4_sent(
     dest: Ipv4Addr,
     destport: i32,
     msg: Vec<u8>,
-) {
+) -> Result<(), UdpError> {
     // packet initialization, then buffer appending stuff
     let mut udp_packet = MutableUdpPacket::owned(msg).unwrap();
     udp_packet.set_source(srcport as u16);
@@ -51,20 +51,24 @@ pub fn tap_udp4_sent(
     ip_packet.set_destination(dest);
     // checksum
     // how can we properly convert to an iovec? this seems too abstracted to be the full thing. there must be more
-    send_single(conf.tap_fd, &[IoSlice::new(&ip_packet.packet())]);
+    send_single(conf, &[IoSlice::new(&ip_packet.packet())]) // do we need another entry for the length ?
 }
 
-fn send_single(fd: i32, data: &[IoSlice]) -> Result<(), UdpError> {
+fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
     // a switch on the mode
     // transformation into an iovec
-    // sendmsg
-    let cmsgs: [ControlMessage<'_>; 0] = [];
-    sendmsg(
-        fd,
-        data,
-        &cmsgs,
-        MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
-        None,
-    )?;
-    Ok(())
+    match conf.mode {
+        Mode::Passt => {
+            let cmsgs: [ControlMessage<'_>; 0] = [];
+            sendmsg(
+                conf.tap_fd,
+                data,
+                &cmsgs,
+                MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
+                None,
+            )?;
+            Ok(())
+        }
+        Mode::Pasta => Ok(()),
+    }
 }
