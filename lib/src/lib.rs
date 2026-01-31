@@ -36,10 +36,6 @@ pub const MAX_FRAME: usize = 65535 + 4;
 #[derive(Debug)]
 pub struct HandlePacketError(pub String);
 
-// these will probaby get overridden if passed in flags
-const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 1]);
-const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 2]);
-
 impl std::fmt::Display for HandlePacketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -123,17 +119,22 @@ pub fn handle_packets(
                                     };
                                     opts.insert(DhcpOption::MessageType(response_type));
                                 };
+                                let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
 
-                                dhcp_msg.set_yiaddr(GUEST_ADDRESS.clone());
+                                dhcp_msg.set_yiaddr(conf.ip4.addr);
                                 opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
-                                opts.insert(DhcpOption::Router(vec![GATEWAY_IP.clone()]));
-                                opts.insert(DhcpOption::ServerIdentifier(GATEWAY_IP.clone()));
-                                opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
-                                    Ipv4Net::new(GATEWAY_IP.clone(), 32).unwrap(),
-                                    GATEWAY_IP.clone(),
-                                )]));
+                                opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
+                                opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
 
-                                // masking
+                                if conf.ip4.guest_gw.to_bits() & mask
+                                    != conf.ip4.addr.to_bits() & mask
+                                {
+                                    opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
+                                        Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
+                                        conf.ip4.guest_gw.clone(),
+                                    )]));
+                                }
+
                                 // eventually
                                 dhcp_msg.set_opts(opts);
                                 let mut msg_buf = Vec::new();
@@ -141,7 +142,14 @@ pub fn handle_packets(
                                 dhcp_msg.encode(&mut enc);
 
                                 // do we build a new packet or use the existing one ?
-                                tap_udp4_sent(conf, GATEWAY_IP, 67, GUEST_ADDRESS, 68, msg_buf);
+                                tap_udp4_sent(
+                                    conf,
+                                    conf.ip4.our_tap_addr,
+                                    67,
+                                    conf.ip4.addr,
+                                    68,
+                                    msg_buf,
+                                );
                             }
 
                             // dhcp ?

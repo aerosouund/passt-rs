@@ -41,17 +41,19 @@ pub fn tap_udp4_sent(
 ) -> Result<(), UdpError> {
     // packet initialization, then buffer appending stuff
     let mut udp_packet = MutableUdpPacket::owned(msg).unwrap();
-    udp_packet.set_source(srcport as u16);
-    udp_packet.set_destination(destport as u16);
+    udp_packet.set_source(srcport.to_be() as u16);
+    udp_packet.set_destination(destport.to_be() as u16);
+    // udp_packet.set_checksum(val); optional. maybe ?
 
     // does calling payload return the full packet or just the payload ? according to chatgpt its the whole
     // packet and in a format the os can handle but i am honestly not convinced
     let mut ip_packet = MutableIpv4Packet::new(udp_packet.payload_mut()).unwrap();
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
-    // checksum
-    // how can we properly convert to an iovec? this seems too abstracted to be the full thing. there must be more
-    send_single(conf, &[IoSlice::new(&ip_packet.packet())]) // do we need another entry for the length ?
+
+    let ip_pkt_raw = ip_packet.packet();
+    let pkt_len: [u8; 1] = [ip_pkt_raw.len() as u8];
+    send_single(conf, &[IoSlice::new(&pkt_len), IoSlice::new(&ip_pkt_raw)])
 }
 
 fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
