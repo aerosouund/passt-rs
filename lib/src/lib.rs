@@ -19,22 +19,24 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 
+use crate::conf::Conf;
 use crate::icmp::IcmpError;
 use crate::muxer::ConnEnum;
 use crate::udp::tap_udp4_sent;
 
-pub const MAX_FRAME: usize = 65535 + 4;
-
+pub mod conf;
 pub mod flow;
 pub mod fwd;
 pub mod icmp;
 pub mod muxer;
 pub mod udp;
 
+pub const MAX_FRAME: usize = 65535 + 4;
+
 #[derive(Debug)]
 pub struct HandlePacketError(pub String);
 
-// these will probaby get overridden if passed
+// these will probaby get overridden if passed in flags
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 2]);
 
@@ -54,6 +56,7 @@ impl From<IcmpError> for HandlePacketError {
 
 #[allow(non_upper_case_globals)]
 pub fn handle_packets(
+    conf: &Conf,
     reg: &Registry,
     stream: &mut UnixStream,
     packets: &mut Vec<EthernetPacket<'static>>,
@@ -138,7 +141,7 @@ pub fn handle_packets(
                                 dhcp_msg.encode(&mut enc);
 
                                 // do we build a new packet or use the existing one ?
-                                tap_udp4_sent(GATEWAY_IP, 67, GUEST_ADDRESS, 68, msg_buf);
+                                tap_udp4_sent(conf, GATEWAY_IP, 67, GUEST_ADDRESS, 68, msg_buf);
                             }
 
                             // dhcp ?

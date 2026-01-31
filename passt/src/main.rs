@@ -1,5 +1,6 @@
 #![allow(non_upper_case_globals)]
 use clap::Parser;
+use libpasst::conf::Conf;
 use libpasst::muxer::{ConnEnum, StreamConnCtx};
 use libpasst::{handle_packets, handle_tap_ethernet};
 use log::{debug, error, info};
@@ -32,6 +33,8 @@ fn main() -> io::Result<()> {
 
     conn_map.insert(Token(0), ConnEnum::SocketListener(listener));
 
+    let mut c = Conf::default(); // todo: parse from arguments
+
     let mut events = Events::with_capacity(16);
     loop {
         poll.poll(&mut events, Some(Duration::from_secs(5)))?;
@@ -45,6 +48,9 @@ fn main() -> io::Result<()> {
                 ConnEnum::SocketListener(ref mut listener_stream) => {
                     let (mut stream, _) = listener_stream.accept().unwrap();
                     let stream_fd = stream.as_raw_fd() as usize;
+                    if c.tap_fd != 0 {
+                        c.tap_fd = stream.as_raw_fd();
+                    };
                     poll.registry()
                         .register(&mut stream, Token(stream_fd), Interest::READABLE)?;
                     conn_map.insert(
@@ -58,6 +64,7 @@ fn main() -> io::Result<()> {
                 ConnEnum::Stream(ref mut stream_ctx) => {
                     let mut packets = handle_tap_ethernet(stream_ctx)?;
                     if let Err(e) = handle_packets(
+                        &c,
                         poll.registry(),
                         stream_ctx.stream(),
                         &mut packets,
