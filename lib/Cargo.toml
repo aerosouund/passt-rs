@@ -12,3 +12,5 @@ nix = { version = "0.30", features = ["event", "socket", "net", "uio"]}
 log = "0.4"
 dhcproto = "0.14.0"
 ipnet = "2.11.0"
+
+serde = { version = "1.0.228", features = ["derive", "rc"] }
