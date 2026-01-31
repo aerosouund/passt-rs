@@ -476,6 +476,7 @@ name = "libpasst"
 version = "0.1.0"
 dependencies = [
  "dhcproto",
+ "ipnet",
  "libc",
  "log",
  "mio 0.8.11",
