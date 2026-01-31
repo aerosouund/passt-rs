@@ -33,11 +33,7 @@ pub enum IcmpError {
 impl std::fmt::Display for IcmpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IcmpError::SysError(e) => write!(
-                f,
-                "Failed to bind to the created icmp socket with status: {}",
-                e
-            ),
+            IcmpError::SysError(e) => write!(f, "sys error, status: {}", e),
             IcmpError::NotEchoError => write!(f, "Packet is not an echo packet"),
             IcmpError::EpollError(e) => write!(f, "IO error: {}", e),
             IcmpError::InvalidSidxError => write!(f, "invalid state index built from packet"),

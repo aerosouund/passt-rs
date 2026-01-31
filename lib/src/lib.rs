@@ -1,5 +1,6 @@
-use dhcproto::Decodable;
-use dhcproto::v4::{Decoder, Message};
+use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
+use dhcproto::{Decodable, Encodable, Encoder};
+use ipnet::Ipv4Net;
 use log::error;
 use mio::Registry;
 use mio::net::UnixStream;
@@ -16,9 +17,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::io::{Read, Write};
+use std::net::Ipv4Addr;
 
 use crate::icmp::IcmpError;
 use crate::muxer::ConnEnum;
+use crate::udp::tap_udp4_sent;
 
 pub const MAX_FRAME: usize = 65535 + 4;
 
@@ -30,6 +33,10 @@ pub mod udp;
 
 #[derive(Debug)]
 pub struct HandlePacketError(pub String);
+
+// these will probaby get overridden if passed
+const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 1]);
+const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 2]);
 
 impl std::fmt::Display for HandlePacketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -77,8 +84,61 @@ pub fn handle_packets(
                             let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
                             // dhcp ? but again, we could send whatever on port 67 but hey
                             if udp_packet.get_destination() == 67 {
-                                let dhcp_msg =
-                                    Message::decode(&mut Decoder::new(v4packet.payload()));
+                                let mut dhcp_msg =
+                                    match Message::decode(&mut Decoder::new(v4packet.payload())) {
+                                        Ok(msg) => msg,
+                                        Err(_) => {
+                                            return Err(HandlePacketError(
+                                                "error parsing dhcp packet".to_string(),
+                                            ));
+                                        }
+                                    };
+
+                                // copy the options outside then set them back to the message at the end (zero copy my ass i guess)
+                                let mut opts = dhcp_msg.opts_mut().clone();
+                                // i wish i can get rid of this clone while reading the message type. i don't need to hold a reference to opts
+                                let msgtype = opts
+                                    .get(dhcproto::v4::OptionCode::MessageType)
+                                    .unwrap()
+                                    .clone();
+
+                                if let DhcpOption::MessageType(msg_type) = msgtype {
+                                    let response_type = match msg_type {
+                                        MessageType::Discover => {
+                                            if opts.contains(OptionCode::RapidCommit) {
+                                                MessageType::Offer
+                                            } else {
+                                                MessageType::Ack
+                                            }
+                                        }
+                                        MessageType::Request => MessageType::Ack,
+                                        _ => {
+                                            return Err(HandlePacketError(
+                                                "invalid dhcp message type".to_string(),
+                                            ));
+                                        }
+                                    };
+                                    opts.insert(DhcpOption::MessageType(response_type));
+                                };
+
+                                dhcp_msg.set_yiaddr(GUEST_ADDRESS.clone());
+                                opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
+                                opts.insert(DhcpOption::Router(vec![GATEWAY_IP.clone()]));
+                                opts.insert(DhcpOption::ServerIdentifier(GATEWAY_IP.clone()));
+                                opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
+                                    Ipv4Net::new(GATEWAY_IP.clone(), 32).unwrap(),
+                                    GATEWAY_IP.clone(),
+                                )]));
+
+                                // masking
+                                // eventually
+                                dhcp_msg.set_opts(opts);
+                                let mut msg_buf = Vec::new();
+                                let mut enc = Encoder::new(&mut msg_buf);
+                                dhcp_msg.encode(&mut enc);
+
+                                // do we build a new packet or use the existing one ?
+                                tap_udp4_sent(GATEWAY_IP, 67, GUEST_ADDRESS, 68, msg_buf);
                             }
 
                             // dhcp ?
