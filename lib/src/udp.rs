@@ -1,6 +1,6 @@
 use crate::conf::{Conf, Mode};
 use nix::errno::Errno;
-use nix::sys::socket::{ControlMessage, MsgFlags, sendmsg};
+use nix::sys::socket::{ControlMessage, MsgFlags, SockaddrIn, sendmsg};
 use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
 use std::fmt;
 use std::io::IoSlice;
@@ -59,6 +59,7 @@ pub fn tap_udp4_sent(
 fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
     // a switch on the mode
     // transformation into an iovec
+    let s: Option<&SockaddrIn> = None;
     match conf.mode {
         Mode::Passt => {
             let cmsgs: [ControlMessage<'_>; 0] = [];
@@ -67,7 +68,7 @@ fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
                 data,
                 &cmsgs,
                 MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
-                None,
+                s,
             )?;
             Ok(())
         }
