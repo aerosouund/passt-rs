@@ -1,3 +1,4 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 
@@ -60,7 +61,7 @@ impl Default for Ipv4Conf {
 #[derive(Default)]
 pub struct Ipv6Conf {}
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     #[default]
