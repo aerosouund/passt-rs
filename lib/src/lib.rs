@@ -12,6 +12,7 @@ use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::udp::UdpPacket;
 use std::collections::HashMap;
 use std::fmt;
@@ -66,6 +67,15 @@ pub fn handle_packets(
                         .write(final_packet.packet())
                         .map_err(|e| error!("{}", e));
                 };
+            }
+
+            // guess we will have to work on this ahead of schedule
+            EtherTypes::Ipv6 => {
+                if let Some(v6packet) = Ipv6Packet::owned(p.packet().to_vec()) {
+                    match v6packet.get_next_header() {
+                        _ => {}
+                    }
+                }
             }
 
             EtherTypes::Ipv4 => {
