@@ -71,7 +71,7 @@ pub fn handle_packets(
 
             // guess we will have to work on this ahead of schedule
             EtherTypes::Ipv6 => {
-                if let Some(v6packet) = Ipv6Packet::owned(p.packet().to_vec()) {
+                if let Some(v6packet) = Ipv6Packet::owned(p.payload().to_vec()) {
                     match v6packet.get_next_header() {
                         _ => {}
                     }
@@ -79,7 +79,7 @@ pub fn handle_packets(
             }
 
             EtherTypes::Ipv4 => {
-                if let Some(v4packet) = Ipv4Packet::owned(p.packet().to_vec()) {
+                if let Some(v4packet) = Ipv4Packet::owned(p.payload().to_vec()) {
                     match v4packet.get_next_level_protocol() {
                         IpNextHeaderProtocols::Icmp => {
                             // handle when we return no new connections
