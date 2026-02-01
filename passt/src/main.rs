@@ -3,10 +3,11 @@ use clap::Parser;
 use libpasst::conf::Conf;
 use libpasst::muxer::{ConnEnum, StreamConnCtx};
 use libpasst::{handle_packets, handle_tap_ethernet};
-use log::{debug, error, info};
+use log::error;
 use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
 
+use conf::Args;
 use std::collections::HashMap;
 use std::io::{self};
 use std::os::unix::io::AsRawFd;

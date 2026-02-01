@@ -14,3 +14,4 @@ dhcproto = "0.14.0"
 ipnet = "2.11.0"
 
 serde = { version = "1.0.228", features = ["derive", "rc"] }
+clap = "4.5.56"
