@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 
-const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 1]);
-const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 256, 2, 2]);
+const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
+const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
 
 #[derive(Default)]
 pub struct Conf {
