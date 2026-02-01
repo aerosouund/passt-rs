@@ -205,11 +205,12 @@ pub fn handle_tap_ethernet(
     let mut n = ctx.stream.read(&mut buf[offset..])?;
 
     while n > 4 {
-        let packet_size: [u8; 8] = buf[offset..offset + 4].try_into().map_err(|e| {
-            error!("failed to parse packet size {e}");
+        let l2len = u32::from_be_bytes(buf[offset..offset + 4].try_into().map_err(|e| {
+            error!("failed to parse packet size: {e}");
             io::Error::new(io::ErrorKind::InvalidData, "failed to parse packet size")
-        })?;
-        let l2len = usize::from_be_bytes(packet_size);
+        })?) as usize;
+
+        // let l2len = usize::from_be_bytes(packet_size);
         if l2len > MAX_FRAME {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
