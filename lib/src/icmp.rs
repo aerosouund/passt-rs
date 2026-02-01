@@ -130,7 +130,7 @@ pub fn new_icmp_flow(
     //
     let nextfree = FLOWS.read().unwrap().next_free;
     let f = &mut FLOWS.write().unwrap().flows[nextfree];
-    let mut ini_f = flow_initiate_af(&mut f, src, dest, srcport, destport, PifType::Host);
+    let mut ini_f = flow_initiate_af(f, src, dest, srcport, destport, PifType::Host);
 
     match f.flow_common.pif[0] {
         PifType::Tap => {
