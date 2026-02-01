@@ -139,7 +139,7 @@ pub fn handle_packets(
                                 dhcp_msg.set_opts(opts);
                                 let mut msg_buf = Vec::new();
                                 let mut enc = Encoder::new(&mut msg_buf);
-                                dhcp_msg.encode(&mut enc);
+                                dhcp_msg.encode(&mut enc).unwrap();
 
                                 // do we build a new packet or use the existing one ?
                                 tap_udp4_sent(
@@ -149,7 +149,8 @@ pub fn handle_packets(
                                     conf.ip4.addr,
                                     68,
                                     msg_buf,
-                                );
+                                )
+                                .unwrap();
                             }
 
                             // dhcp ?
