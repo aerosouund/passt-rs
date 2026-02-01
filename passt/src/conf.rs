@@ -8,5 +8,5 @@ struct Args {
     socket_path: String,
     /// Passt mode
     #[arg(short = 'm', long = "mode", default_value = Mode::Passt)]
-    socket_path: Mode,
+    mode: Mode,
 }
