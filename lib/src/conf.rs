@@ -1,6 +1,7 @@
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use std::net::Ipv4Addr;
+use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
@@ -8,9 +9,21 @@ const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
 #[derive(Default)]
 pub struct Conf {
     pub tap_fd: i32,
+    pub nl_socket: i32,
     pub mode: Mode,
     pub ip4: Ipv4Conf,
     pub ip6: Ipv6Conf,
+}
+
+impl Conf {
+    fn init() -> Self {
+        // change this later
+        Conf::default()
+    }
+}
+
+fn init_netlink_socket() -> Result<i32, io::Error> {
+    Ok(0)
 }
 
 /*
@@ -58,8 +71,18 @@ impl Default for Ipv4Conf {
     }
 }
 
-#[derive(Default)]
-pub struct Ipv6Conf {}
+// we need to know where the ip6 context gets created and whats the mac address
+pub struct Ipv6Conf {
+    pub addr: Ipv6Addr,
+}
+
+impl Default for Ipv6Conf {
+    fn default() -> Self {
+        Ipv6Conf {
+            addr: GUEST_ADDRESS,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]

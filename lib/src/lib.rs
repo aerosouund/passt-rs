@@ -20,6 +20,9 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 
+use pnet::packet::icmpv6::ndp::{MutableRouterAdvertPacket, NdpOption, NdpOptionTypes};
+use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types, MutableIcmpv6Packet};
+
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
 use crate::muxer::ConnEnum;
@@ -69,105 +72,15 @@ pub fn handle_packets(
                 };
             }
 
-            // guess we will have to work on this ahead of schedule
             EtherTypes::Ipv6 => {
                 if let Some(v6packet) = Ipv6Packet::owned(p.payload().to_vec()) {
-                    match v6packet.get_next_header() {
-                        _ => {}
-                    }
+                    tap_handle_v6(conf, v6packet, reg, conn_map).map_err(|e| error!("{}", e));
                 }
             }
 
             EtherTypes::Ipv4 => {
                 if let Some(v4packet) = Ipv4Packet::owned(p.payload().to_vec()) {
-                    match v4packet.get_next_level_protocol() {
-                        IpNextHeaderProtocols::Icmp => {
-                            // handle when we return no new connections
-                            if let Some((token, conn)) = icmp::handle_icmp_packet(reg, v4packet)
-                                .map_err(HandlePacketError::from)?
-                            {
-                                conn_map.insert(token, conn);
-                            };
-                        }
-                        IpNextHeaderProtocols::Udp => {
-                            let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
-                            // dhcp ? but again, we could send whatever on port 67 but hey
-                            if udp_packet.get_destination() == 67 {
-                                let mut dhcp_msg =
-                                    match Message::decode(&mut Decoder::new(v4packet.payload())) {
-                                        Ok(msg) => msg,
-                                        Err(_) => {
-                                            return Err(HandlePacketError(
-                                                "error parsing dhcp packet".to_string(),
-                                            ));
-                                        }
-                                    };
-
-                                // copy the options outside then set them back to the message at the end (zero copy my ass i guess)
-                                let mut opts = dhcp_msg.opts_mut().clone();
-                                // i wish i can get rid of this clone while reading the message type. i don't need to hold a reference to opts
-                                let msgtype = opts
-                                    .get(dhcproto::v4::OptionCode::MessageType)
-                                    .unwrap()
-                                    .clone();
-
-                                if let DhcpOption::MessageType(msg_type) = msgtype {
-                                    let response_type = match msg_type {
-                                        MessageType::Discover => {
-                                            if opts.contains(OptionCode::RapidCommit) {
-                                                MessageType::Offer
-                                            } else {
-                                                MessageType::Ack
-                                            }
-                                        }
-                                        MessageType::Request => MessageType::Ack,
-                                        _ => {
-                                            return Err(HandlePacketError(
-                                                "invalid dhcp message type".to_string(),
-                                            ));
-                                        }
-                                    };
-                                    opts.insert(DhcpOption::MessageType(response_type));
-                                };
-                                let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
-
-                                dhcp_msg.set_yiaddr(conf.ip4.addr);
-                                opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
-                                opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
-                                opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
-
-                                if conf.ip4.guest_gw.to_bits() & mask
-                                    != conf.ip4.addr.to_bits() & mask
-                                {
-                                    opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
-                                        Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
-                                        conf.ip4.guest_gw.clone(),
-                                    )]));
-                                }
-
-                                // eventually
-                                dhcp_msg.set_opts(opts);
-                                let mut msg_buf = Vec::new();
-                                let mut enc = Encoder::new(&mut msg_buf);
-                                dhcp_msg.encode(&mut enc).unwrap();
-
-                                // do we build a new packet or use the existing one ?
-                                tap_udp4_sent(
-                                    conf,
-                                    conf.ip4.our_tap_addr,
-                                    67,
-                                    conf.ip4.addr,
-                                    68,
-                                    msg_buf,
-                                )
-                                .unwrap();
-                            }
-
-                            // dhcp ?
-                        }
-                        IpNextHeaderProtocols::Tcp => {}
-                        _ => {}
-                    }
+                    tap_handle_v4(conf, v4packet, reg, conn_map).map_err(|e| error!("{}", e));
                 }
             }
 
@@ -177,8 +90,100 @@ pub fn handle_packets(
     Ok(())
 }
 
-// should i wrap it in an ethernet packet like i did with arp ?
-// fn build_ipv4_packet(packet_data: &mut Vec<u8>) -> Option<Ipv4<'static>> {}
+fn tap_handle_v6(
+    conf: &Conf,
+    v6packet: Ipv6Packet<'static>,
+    reg: &Registry,
+    conn_map: &mut HashMap<mio::Token, ConnEnum>,
+) -> Result<(), HandlePacketError> {
+    match v6packet.get_next_header() {
+        IpNextHeaderProtocols::Icmpv6 => {}
+        _ => {}
+    }
+    Ok(())
+}
+
+fn tap_handle_v4(
+    conf: &Conf,
+    v4packet: Ipv4Packet<'static>,
+    reg: &Registry,
+    conn_map: &mut HashMap<mio::Token, ConnEnum>,
+) -> Result<(), HandlePacketError> {
+    match v4packet.get_next_level_protocol() {
+        IpNextHeaderProtocols::Icmp => {
+            // handle when we return no new connections
+            if let Some((token, conn)) =
+                icmp::handle_icmp4_packet(reg, v4packet).map_err(HandlePacketError::from)?
+            {
+                conn_map.insert(token, conn);
+            };
+        }
+        IpNextHeaderProtocols::Udp => {
+            let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
+            // dhcp ? but again, we could send whatever on port 67 but hey
+            if udp_packet.get_destination() == 67 {
+                let mut dhcp_msg = match Message::decode(&mut Decoder::new(v4packet.payload())) {
+                    Ok(msg) => msg,
+                    Err(_) => {
+                        return Err(HandlePacketError("error parsing dhcp packet".to_string()));
+                    }
+                };
+
+                // copy the options outside then set them back to the message at the end (zero copy my ass i guess)
+                let mut opts = dhcp_msg.opts_mut().clone();
+                // i wish i can get rid of this clone while reading the message type. i don't need to hold a reference to opts
+                let msgtype = opts
+                    .get(dhcproto::v4::OptionCode::MessageType)
+                    .unwrap()
+                    .clone();
+
+                if let DhcpOption::MessageType(msg_type) = msgtype {
+                    let response_type = match msg_type {
+                        MessageType::Discover => {
+                            if opts.contains(OptionCode::RapidCommit) {
+                                MessageType::Offer
+                            } else {
+                                MessageType::Ack
+                            }
+                        }
+                        MessageType::Request => MessageType::Ack,
+                        _ => {
+                            return Err(HandlePacketError("invalid dhcp message type".to_string()));
+                        }
+                    };
+                    opts.insert(DhcpOption::MessageType(response_type));
+                };
+                let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
+
+                dhcp_msg.set_yiaddr(conf.ip4.addr);
+                opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
+                opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
+                opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
+
+                if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
+                    opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
+                        Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
+                        conf.ip4.guest_gw.clone(),
+                    )]));
+                }
+
+                // eventually
+                dhcp_msg.set_opts(opts);
+                let mut msg_buf = Vec::new();
+                let mut enc = Encoder::new(&mut msg_buf);
+                dhcp_msg.encode(&mut enc).unwrap();
+
+                // do we build a new packet or use the existing one ?
+                tap_udp4_sent(conf, conf.ip4.our_tap_addr, 67, conf.ip4.addr, 68, msg_buf).unwrap();
+            }
+
+            // dhcp ?
+        }
+        IpNextHeaderProtocols::Tcp => {}
+        _ => {}
+    }
+    Ok(())
+}
 
 fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static>> {
     let mut arp_packet = MutableArpPacket::new(packet_data.as_mut_slice()).unwrap();

@@ -1,5 +1,5 @@
 use std::fmt;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net;
 
@@ -11,11 +11,15 @@ use nix::sys::socket::{
     MsgFlags, SockFlag, SockProtocol, SockaddrIn, bind, sendto, setsockopt, socket, sockopt,
 };
 
-use pnet::packet::Packet;
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
+use pnet::packet::icmpv6::ndp::{MutableRouterAdvertPacket, NdpOption, NdpOptionTypes};
+use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
+use pnet::packet::{MutablePacket, Packet};
 
+use crate::Conf;
 use crate::flow::{
     FLOWATSIDX, FLOWS, Flow, FlowType, Flowside, PifType, StateIdx, flow_initiate_af,
 };
@@ -49,7 +53,19 @@ impl From<Errno> for IcmpError {
 
 impl std::error::Error for IcmpError {}
 
-pub fn handle_icmp_packet(
+pub fn handle_icmp6_packet(conf: &Conf, v6packet: Ipv6Packet<'static>) -> Result<(), IcmpError> {
+    let src = v6packet.get_source();
+    let dest = v6packet.get_destination();
+    let icmp_packet = Icmpv6Packet::owned(v6packet.payload().to_owned()).unwrap();
+    match icmp_packet.get_icmpv6_type() {
+        Icmpv6Types::NeighborSolicit => ndp_na(conf, dest),
+        Icmpv6Types::RouterSolicit => ndp_ra(conf, dest),
+        // treat this as a normal icmp packet
+        _ => Err(IcmpError::SysError(5)),
+    }
+}
+
+pub fn handle_icmp4_packet(
     reg: &Registry,
     v4packet: Ipv4Packet,
 ) -> Result<Option<(Token, ConnEnum)>, IcmpError> {
@@ -179,4 +195,78 @@ pub fn new_icmp_flow(
     FLOWATSIDX.write().unwrap().insert(f.side[1], sidx);
     Ok(fd.as_raw_fd())
     // not sure if this insert maps to whats really in the c code
+}
+
+fn ndp_na(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
+    Ok(())
+}
+
+fn ndp_ra(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
+    /*
+     * 	struct ndp_ra ra = {
+        .ih = {
+            .icmp6_type		= RA,
+            .icmp6_code		= 0,
+            .icmp6_hop_limit	= 255,
+            /* RFC 8319 */
+            .icmp6_rt_lifetime	= htons_constant(RT_LIFETIME),
+            .icmp6_addrconf_managed	= 1,
+        },
+        .prefix_info = {
+            .header = {
+                .type		= OPT_PREFIX_INFO,
+                .len		= 4,
+            },
+            .prefix_len		= 64,
+            .prefix_flags		= 0xc0,	/* prefix flags: L, A */
+            .valid_lifetime		= ~0U,
+            .pref_lifetime		= ~0U,
+        },
+        .prefix = c->ip6.addr,
+        .source_ll = {
+            .header = {
+                .type		= OPT_SRC_L2_ADDR,
+                .len		= 1,
+            },
+        },
+    };
+     */
+
+    let mut router_adv = MutableRouterAdvertPacket::new(&mut []).unwrap();
+    router_adv.set_hop_limit(255);
+
+    let prefix = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0); // need to instead get the ip6 from the config
+
+    let mut prefix_opt_data = Vec::with_capacity(32);
+    prefix_opt_data.push(64);
+    prefix_opt_data.push(0xC0);
+    prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
+    prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
+    prefix_opt_data.extend_from_slice(&0u32.to_be_bytes());
+    prefix_opt_data.extend_from_slice(&prefix.octets());
+    let prefix_opt = NdpOption {
+        option_type: NdpOptionTypes::PrefixInformation,
+        length: 32,
+        data: prefix_opt_data,
+    };
+
+    // should be our mac address obtained from the config also
+    let mut ll_opt_data = Vec::with_capacity(1);
+    ll_opt_data.push(1);
+    let ll_opt = NdpOption {
+        option_type: NdpOptionTypes::SourceLLAddr,
+        length: 1,
+        data: ll_opt_data,
+    };
+
+    // where is the prefix information field on this packet type ?
+    router_adv.set_options(&[prefix_opt]);
+
+    // do we need this or are we able to directly wrap the ndp packet into the ip6 packet
+    let mut reply = MutableIcmpv6Packet::new(&mut []).unwrap();
+
+    let mut v6reply = MutableIpv6Packet::new(reply.packet_mut()).unwrap();
+    // v6reply.set_source(val); // what should this be ?
+    v6reply.set_destination(dest);
+    Ok(())
 }
