@@ -12,7 +12,10 @@ use nix::sys::socket::{
 };
 
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
-use pnet::packet::icmpv6::ndp::{MutableRouterAdvertPacket, NdpOption, NdpOptionTypes};
+use pnet::packet::icmpv6::ndp::{
+    MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
+    NeighborSolicitPacket,
+};
 use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
@@ -58,7 +61,10 @@ pub fn handle_icmp6_packet(conf: &Conf, v6packet: Ipv6Packet<'static>) -> Result
     let dest = v6packet.get_destination();
     let icmp_packet = Icmpv6Packet::owned(v6packet.payload().to_owned()).unwrap();
     match icmp_packet.get_icmpv6_type() {
-        Icmpv6Types::NeighborSolicit => ndp_na(conf, dest),
+        Icmpv6Types::NeighborSolicit => {
+            let ns_packet = NeighborSolicitPacket::owned(icmp_packet.payload().to_owned()).unwrap();
+            ndp_na(conf, dest, ns_packet.get_target_addr())
+        }
         Icmpv6Types::RouterSolicit => ndp_ra(conf, dest),
         // treat this as a normal icmp packet
         _ => Err(IcmpError::SysError(5)),
@@ -197,7 +203,42 @@ pub fn new_icmp_flow(
     // not sure if this insert maps to whats really in the c code
 }
 
-fn ndp_na(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
+/*
+
+   struct ndp_na na = {
+  .ih = {
+   .icmp6_type		= NA,
+   .icmp6_code		= 0,
+   .icmp6_router		= 1,
+   .icmp6_solicited	= 1,
+   .icmp6_override		= 1,
+ },
+ .target_addr = *addr,
+ .target_l2_addr = {
+   .header	= {
+     .type= OPT_TARGET_L2_ADDR,
+     .len= 1,
+    },
+  }
+   };
+
+
+* */
+
+fn ndp_na(conf: &Conf, dest: Ipv6Addr, addr: Ipv6Addr) -> Result<(), IcmpError> {
+    let mut neighbor_adv = MutableNeighborAdvertPacket::new(&mut []).unwrap();
+    neighbor_adv.set_target_addr(addr);
+    let mut ll_opt_data = Vec::with_capacity(1);
+    ll_opt_data.push(1);
+    let l2_opt = NdpOption {
+        option_type: NdpOptionTypes::TargetLLAddr,
+        length: 1,
+        data: ll_opt_data,
+    };
+    neighbor_adv.set_options(&[l2_opt]);
+    let mut reply = MutableIcmpv6Packet::new(&mut []).unwrap();
+    let mut v6reply = MutableIpv6Packet::new(reply.packet_mut()).unwrap();
+    v6reply.set_destination(dest);
     Ok(())
 }
 
