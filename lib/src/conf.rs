@@ -1,10 +1,12 @@
 use clap::ValueEnum;
+use pnet::util::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
+const TAP_MAC: [u8; 6] = [0x9a, 0x55, 0x9a, 0x55, 0x9a, 0x55];
 
 #[derive(Default)]
 pub struct Conf {
@@ -13,6 +15,7 @@ pub struct Conf {
     pub mode: Mode,
     pub ip4: Ipv4Conf,
     pub ip6: Ipv6Conf,
+    pub tap_mac: [u8; 6] = TAP_MAC,
 }
 
 impl Conf {
@@ -79,7 +82,8 @@ pub struct Ipv6Conf {
 impl Default for Ipv6Conf {
     fn default() -> Self {
         Ipv6Conf {
-            addr: GUEST_ADDRESS,
+            // fill later with real addr
+            addr: Ipv6Addr::from_octets([0; 16]),
         }
     }
 }
