@@ -228,12 +228,10 @@ pub fn new_icmp_flow(
 fn ndp_na(conf: &Conf, dest: Ipv6Addr, addr: Ipv6Addr) -> Result<(), IcmpError> {
     let mut neighbor_adv = MutableNeighborAdvertPacket::new(&mut []).unwrap();
     neighbor_adv.set_target_addr(addr);
-    let mut ll_opt_data = Vec::with_capacity(1);
-    ll_opt_data.push(1);
     let l2_opt = NdpOption {
         option_type: NdpOptionTypes::TargetLLAddr,
         length: 1,
-        data: ll_opt_data,
+        data: conf.tap_mac.to_vec(),
     };
     neighbor_adv.set_options(&[l2_opt]);
     let mut reply = MutableIcmpv6Packet::new(&mut []).unwrap();
@@ -292,16 +290,13 @@ fn ndp_ra(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
     };
 
     // should be our mac address obtained from the config also
-    let mut ll_opt_data = Vec::with_capacity(1);
-    ll_opt_data.push(1);
     let ll_opt = NdpOption {
         option_type: NdpOptionTypes::SourceLLAddr,
         length: 1,
-        data: ll_opt_data,
+        data: conf.tap_mac.to_vec(),
     };
-
     // where is the prefix information field on this packet type ?
-    router_adv.set_options(&[prefix_opt]);
+    router_adv.set_options(&[prefix_opt, ll_opt]);
 
     // do we need this or are we able to directly wrap the ndp packet into the ip6 packet
     let mut reply = MutableIcmpv6Packet::new(&mut []).unwrap();
