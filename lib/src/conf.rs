@@ -1,11 +1,13 @@
 use clap::ValueEnum;
+use linux_raw_sys::netlink::rtnexthop;
 use neli::consts::nl::{NlTypeWrapper, NlmF};
 use neli::consts::rtnl::{RtAddrFamily, RtScope, RtTable, Rta, Rtm, Rtn, Rtprot};
-use neli::consts::socket::NlFamily;
+use neli::consts::socket::{AddrFamily, NlFamily};
 use neli::router::synchronous::NlRouter;
 use neli::rtnl::{RtattrBuilder, Rtmsg, RtmsgBuilder};
 use neli::types::RtBuffer;
 use neli::utils::Groups;
+use std::net::IpAddr;
 
 use log::{error, info};
 use neli::nl::{NlPayload, Nlmsghdr};
@@ -20,6 +22,8 @@ const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
 // ammar: check what those usually are in passt by default
 const V6_GATEWAY_ADDR: Ipv6Addr = Ipv6Addr::from_octets([0; 16]);
 const GUEST_V6_ADDRESS: Ipv6Addr = Ipv6Addr::from_octets([0; 16]);
+
+enum InitConfError {}
 
 pub struct Conf {
     pub tap_fd: i32,
@@ -42,22 +46,22 @@ impl Conf {
 
     fn init() -> Result<Self, std::io::Error> {
         let (nl_socket, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
-        let ifi = nl_get_exit_ifi_v6(&nl_socket)?;
+        let ifi = nl_get_exit_ifi(&nl_socket, RtAddrFamily::Inet6)?;
 
-        let gatewayv6 = nl_get_default_gw_v6(&nl_socket, ifi)?;
+        let gatewayv6 = nl_get_default_gw(&nl_socket, ifi, RtAddrFamily::Inet6)?;
         let mut c = Conf::new(nl_socket);
-        c.ip6.guest_gw = gatewayv6;
+        c.ip6.guest_gw = Ipv6Addr::from_octets(gatewayv6.try_into().unwrap());
         Ok(c)
     }
 }
 
 #[allow(unused_assignments)]
-pub fn nl_get_exit_ifi_v6(nl_sock: &NlRouter) -> Result<u32, io::Error> {
+pub fn nl_get_exit_ifi(nl_sock: &NlRouter, address_family: RtAddrFamily) -> Result<u32, io::Error> {
     let (mut thisifi, mut defifi, mut anyifi) = (0, 0, 0);
-    let mut dest = Ipv6Addr::UNSPECIFIED;
+    let mut dest = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // placeholder
 
     let rtmsg = RtmsgBuilder::default()
-        .rtm_family(RtAddrFamily::Inet6)
+        .rtm_family(address_family)
         .rtm_dst_len(0)
         .rtm_src_len(0)
         .rtm_tos(0)
@@ -71,7 +75,11 @@ pub fn nl_get_exit_ifi_v6(nl_sock: &NlRouter) -> Result<u32, io::Error> {
     // how much buffer space are we allocating to receive these things ?
     // this api is diabolical. i need to understand it properly
     let recv = nl_sock
-        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::DUMP, NlPayload::Payload(rtmsg))
+        .send::<_, _, NlTypeWrapper, _>(
+            Rtm::Getroute,
+            NlmF::DUMP | NlmF::REQUEST,
+            NlPayload::Payload(rtmsg),
+        )
         .unwrap();
 
     for res in recv {
@@ -93,11 +101,34 @@ pub fn nl_get_exit_ifi_v6(nl_sock: &NlRouter) -> Result<u32, io::Error> {
                             // dest is an address, we check the first bit of it to see if its a local prefix
                             // we should add a dest variable that will keep track fo the dest we are sent
                             // and it will get overriden by the last attribute. so we should do the check outside of the attribute loop
-                            dest = Ipv6Addr::from_octets(
-                                attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
-                            );
+                            match address_family {
+                                RtAddrFamily::Inet6 => {
+                                    dest = std::net::IpAddr::V6(Ipv6Addr::from_octets(
+                                        attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
+                                    ));
+                                }
+                                RtAddrFamily::Inet => {
+                                    dest = std::net::IpAddr::V4(Ipv4Addr::from_octets(
+                                        attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
+                                    ));
+                                }
+                                _ => {
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::InvalidData,
+                                        format!(
+                                            "invalid address family was passed {:?}",
+                                            address_family
+                                        ),
+                                    ));
+                                }
+                            }
                         }
-                        Rta::Multipath => {}
+                        Rta::Multipath => {
+                            // try to find if there is a solution here that doesn't need unsafe
+                            let rtnexthop =
+                                attr.rta_payload().as_ref() as *const _ as *const rtnexthop;
+                            thisifi = unsafe { (*rtnexthop).rtnh_ifindex as u32 }
+                        }
                         _ => {
                             // we don't care about that attribute
                             continue;
@@ -109,9 +140,17 @@ pub fn nl_get_exit_ifi_v6(nl_sock: &NlRouter) -> Result<u32, io::Error> {
                     continue;
                 }
 
-                // dont know if this check is equal to what the c code does
-                if dest.is_loopback() {
-                    continue;
+                match dest {
+                    IpAddr::V4(ip4) => {
+                        if ip4.is_link_local() {
+                            continue;
+                        }
+                    }
+                    IpAddr::V6(ip6) => {
+                        if ip6.is_unicast_link_local() {
+                            continue;
+                        }
+                    }
                 }
 
                 if *payload.rtm_dst_len() == 0 {
@@ -135,7 +174,11 @@ pub fn nl_get_exit_ifi_v6(nl_sock: &NlRouter) -> Result<u32, io::Error> {
     ));
 }
 
-pub fn nl_get_default_gw_v6(nl_sock: &NlRouter, iface_idx: u32) -> Result<Ipv6Addr, io::Error> {
+pub fn nl_get_default_gw(
+    nl_sock: &NlRouter,
+    iface_idx: u32,
+    address_family: RtAddrFamily,
+) -> Result<Vec<u8>, io::Error> {
     let oif_attr = RtattrBuilder::default()
         .rta_type(Rta::Oif)
         .rta_payload(iface_idx)
@@ -145,7 +188,7 @@ pub fn nl_get_default_gw_v6(nl_sock: &NlRouter, iface_idx: u32) -> Result<Ipv6Ad
     attrs.push(oif_attr);
 
     let rtmsg = RtmsgBuilder::default()
-        .rtm_family(RtAddrFamily::Inet6)
+        .rtm_family(address_family)
         .rtm_dst_len(0)
         .rtm_src_len(0)
         .rtm_tos(0)
@@ -157,7 +200,6 @@ pub fn nl_get_default_gw_v6(nl_sock: &NlRouter, iface_idx: u32) -> Result<Ipv6Ad
         .build()
         .unwrap();
 
-    // should i add the request flag on the other socket send too ?
     let recv = nl_sock
         .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::REQUEST, NlPayload::Payload(rtmsg))
         .unwrap();
@@ -166,21 +208,34 @@ pub fn nl_get_default_gw_v6(nl_sock: &NlRouter, iface_idx: u32) -> Result<Ipv6Ad
         let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type() {
             if let Some(payload) = rtm.get_payload() {
-                // a loop over attributes to do the same logic
                 for attr in payload.rtattrs().iter() {
                     match attr.rta_type() {
-                        Rta::Gateway => {
-                            let gw_addr = Ipv6Addr::from_octets(
-                                attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
-                            );
-                            return Ok(gw_addr);
+                        Rta::Gateway => match address_family {
+                            RtAddrFamily::Inet => {
+                                return Ok(attr.rta_payload().as_ref()[0..4].try_into().unwrap());
+                            }
+                            RtAddrFamily::Inet6 => {
+                                return Ok(attr.rta_payload().as_ref()[0..16].try_into().unwrap());
+                            }
+                            _ => {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!(
+                                        "invalid address family was passed {:?}",
+                                        address_family
+                                    ),
+                                ));
+                            }
+                        },
+                        _ => {
+                            // an attribute we don't care about
                         }
-                        _ => {}
                     }
                 }
             }
         }
     }
+
     return Err(io::Error::new(
         io::ErrorKind::InvalidData,
         "found no message with a gateway attribute for interface index",
