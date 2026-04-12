@@ -1,18 +1,18 @@
 use clap::ValueEnum;
-use neli::FromBytes;
-use netlink_packet_route::route::{
-    RouteAddress, RouteAttribute, RouteHeader, RouteMessage, RouteMessageBuffer, RouteScope,
-};
+use neli::consts::nl::{NlTypeWrapper, NlmF};
+use neli::consts::rtnl::{RtAddrFamily, RtScope, RtTable, Rta, Rtm, Rtn, Rtprot};
+use neli::consts::socket::NlFamily;
+use neli::router::synchronous::NlRouter;
+use neli::rtnl::{RtattrBuilder, Rtmsg, RtmsgBuilder};
+use neli::types::RtBuffer;
+use neli::utils::Groups;
 
 use log::{error, info};
-use neli::nl::Nlmsghdr;
+use neli::nl::{NlPayload, Nlmsghdr};
 use serde::{Deserialize, Serialize};
 
-use netlink_packet_core::{NetlinkHeader, NetlinkMessage, Parseable};
-use nix::sys::socket::{SockFlag, SockProtocol, bind, socket};
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
@@ -23,242 +23,168 @@ const GUEST_V6_ADDRESS: Ipv6Addr = Ipv6Addr::from_octets([0; 16]);
 
 pub struct Conf {
     pub tap_fd: i32,
-    pub nl_socket: OwnedFd, // ammar: this is not ideal. we need to either initialize the netlink socket somewhere else or have this be an i32
+    pub nl_socket: NlRouter,
     pub mode: Mode,
     pub ip4: Ipv4Conf,
     pub ip6: Ipv6Conf,
 }
 
-impl Default for Conf {
-    fn default() -> Self {
+impl Conf {
+    fn new(nl_sock: NlRouter) -> Self {
         Conf {
             tap_fd: 0,
-            nl_socket: unsafe { OwnedFd::from_raw_fd(0) },
+            nl_socket: nl_sock,
             mode: Mode::Passt,
             ip4: Ipv4Conf::default(),
             ip6: Ipv6Conf::default(),
         }
     }
-}
 
-impl Conf {
     fn init() -> Result<Self, std::io::Error> {
-        let nl_socket = init_netlink_socket()?;
-        let mut c = Conf::default();
-        let gatewayv6 = nl_get_default_gw_v6(&nl_socket, 0)?; // where should the interface index come from ?
+        let (nl_socket, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
+        let ifi = nl_get_exit_ifi_v6(&nl_socket)?;
 
-        c.nl_socket = nl_socket;
+        let gatewayv6 = nl_get_default_gw_v6(&nl_socket, ifi)?;
+        let mut c = Conf::new(nl_socket);
+        c.ip6.guest_gw = gatewayv6;
         Ok(c)
     }
 }
 
-pub fn init_netlink_socket() -> Result<OwnedFd, std::io::Error> {
-    let fd = socket(
-        nix::sys::socket::AddressFamily::Netlink,
-        nix::sys::socket::SockType::Raw,
-        SockFlag::SOCK_CLOEXEC,
-        SockProtocol::NetlinkRoute,
-    )?;
-    // then bind
-    // how to build a netlink socket address ?
-    // bind(fd, addr)
-
-    Ok(fd)
-}
-
 #[allow(unused_assignments)]
-pub fn nl_get_exit_ifi_v6(nl_sock: &OwnedFd) -> Result<u32, io::Error> {
-    let mut nl_hdr = NetlinkHeader::default();
-    let mut route_msg = RouteMessage::default();
-    let attr: Vec<RouteAttribute> = Vec::new();
-
+pub fn nl_get_exit_ifi_v6(nl_sock: &NlRouter) -> Result<u32, io::Error> {
     let (mut thisifi, mut defifi, mut anyifi) = (0, 0, 0);
+    let mut dest = Ipv6Addr::UNSPECIFIED;
 
-    // set the dump flag on the header NLM_F_DUMP
-    nl_hdr.flags |= netlink_packet_core::NLM_F_DUMP;
-    route_msg.attributes = attr;
-    route_msg.header.table = RouteHeader::RT_TABLE_MAIN;
-    route_msg.header.scope = RouteScope::Universe;
-    route_msg.header.address_family = netlink_packet_route::AddressFamily::Inet6;
+    let rtmsg = RtmsgBuilder::default()
+        .rtm_family(RtAddrFamily::Inet6)
+        .rtm_dst_len(0)
+        .rtm_src_len(0)
+        .rtm_tos(0)
+        .rtm_table(RtTable::Main)
+        .rtm_protocol(Rtprot::Unspec)
+        .rtm_scope(RtScope::Universe)
+        .rtm_type(Rtn::Unspec)
+        .build()
+        .unwrap();
 
-    let nl_msg = NetlinkMessage::new(
-        nl_hdr,
-        netlink_packet_core::NetlinkPayload::InnerMessage(route_msg),
-    );
+    // how much buffer space are we allocating to receive these things ?
+    // this api is diabolical. i need to understand it properly
+    let recv = nl_sock
+        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::DUMP, NlPayload::Payload(rtmsg))
+        .unwrap();
 
-    let n = unsafe {
-        libc::send(
-            nl_sock.as_raw_fd(),
-            &nl_msg as *const _ as *mut std::ffi::c_void,
-            std::mem::size_of_val(&nl_msg),
-            0,
-        )
-    };
-    if n == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    let mut recv_buf: Vec<u8> = vec![0u8; 65536];
-
-    loop {
-        // if this is a non blocking socket then we would get e would block if messages ran out
-        let n = unsafe {
-            libc::recv(
-                nl_sock.as_raw_fd(),
-                recv_buf.as_mut_ptr() as *mut std::ffi::c_void,
-                std::mem::size_of_val(&recv_buf),
-                0,
-            )
-        };
-        if n == -1 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let received = recv_buf.as_slice();
-        let mut offset = 0;
-        let hdr_size = std::mem::size_of::<libc::nlmsghdr>();
-
-        let mut cursor = std::io::Cursor::new(received);
-        while offset + hdr_size < received.len() {
-            let hdr = unsafe {
-                std::ptr::read_unaligned(received.as_ptr().add(offset) as *const libc::nlmsghdr)
-            };
-            // wtf is this garbage man this nli packet forces me to get also a payload ???
-            let nli_hdr = Nlmsghdr::from_bytes(&mut cursor);
-            offset += hdr_size;
-
-            let msg_len = hdr.nlmsg_len as usize;
-
-            if offset + msg_len > received.len() {
-                // check if we have up to msg_len bytes in the buffer or less (truncate)
-            }
-            // switch on the msg header type and check if we can convert this libc type into a safe type
-
-            offset += msg_len;
-        }
-
-        let nl_msghdr = recv_buf.as_mut_ptr() as *mut libc::nlmsghdr;
-
-        /*
-        - for (whats remaining is less than the length of an ethernet header)
-        - read a header
-        - read the length if we have up to that length available in the buffer still
-        - if we don't then we need to receive more bytes into a new buffer and we need to store the partial buffer somewhere
-        - thats a packet
-        - advance offset by header+len
-         */
-        let msg_size = unsafe { std::ptr::read_unaligned(&(*nl_msghdr).nlmsg_len) };
-        // create a message starting from 0 till header offset up until header length
-
-        let buf: RouteMessageBuffer<&[u8; 10]> =
-            RouteMessageBuffer::new(recv_buf.as_array().unwrap());
-
-        // i need to be able to continue on error but i can't error on the closure
-        let route_msg: RouteMessage;
-
-        if let Ok(rtm) = RouteMessage::parse(&buf) {
-            route_msg = rtm;
-        } else {
-            // find a way to still have access to the error
-            error!("failed to parse the message as a netlink route message",);
-            continue;
-        }
-
-        for attr in route_msg.attributes.to_owned() {
-            match attr {
-                RouteAttribute::Oif(ifi) => {
-                    thisifi = ifi;
-                }
-                RouteAttribute::Destination(addr) => {}
-                RouteAttribute::MultiPath(next_hops) => {}
-                _ => {}
-            }
-        }
-
-        // we didn't get an oif attribute, or the one we got was the loopback
-        if thisifi == 0 || thisifi == 1 {
-            continue;
-        }
-
-        if route_msg.header.destination_prefix_length == 0 {
-            // we wanna get the first interface index with ba default route
-            // the c code did some logging around this but for simplicity we just wanna get this default first interface
-            defifi = thisifi
-        } else {
-            // in the c code we try to set two variables to keep track of the different types of route prefixes the interface we are
-            // processing has. the defifi and anyifi
-            // we will in the end return defifi because its more general
-            anyifi = thisifi
-        }
-        // in the c code how do we break out of the message processing loop ?
-    }
-}
-
-pub fn nl_get_default_gw_v6(nl_sock: &OwnedFd, iface_idx: u32) -> Result<Ipv6Addr, io::Error> {
-    let nl_hdr = NetlinkHeader::default();
-    let mut route_msg = RouteMessage::default();
-    let mut attr: Vec<RouteAttribute> = Vec::new();
-    attr.push(RouteAttribute::Oif(iface_idx));
-
-    route_msg.attributes = attr;
-    route_msg.header.table = RouteHeader::RT_TABLE_MAIN;
-    route_msg.header.scope = RouteScope::Universe;
-    route_msg.header.address_family = netlink_packet_route::AddressFamily::Inet6;
-
-    let nl_msg = NetlinkMessage::new(
-        nl_hdr,
-        netlink_packet_core::NetlinkPayload::InnerMessage(route_msg),
-    );
-
-    let n = unsafe {
-        libc::send(
-            nl_sock.as_raw_fd(),
-            &nl_msg as *const _ as *mut std::ffi::c_void,
-            std::mem::size_of_val(&nl_msg),
-            0,
-        )
-    };
-    if n == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    // receive from the socket the message type you are expecting, which is RTM_NEWROUTE
-    loop {
-        let rt_msg_size = std::mem::size_of::<RouteMessage>();
-        let mut recv_buf: Vec<u8> = vec![0u8; rt_msg_size];
-        let n = unsafe {
-            libc::recv(
-                nl_sock.as_raw_fd(),
-                recv_buf.as_mut_ptr() as *mut std::ffi::c_void,
-                std::mem::size_of_val(&recv_buf),
-                0,
-            )
-        };
-        if n == -1 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let buf: RouteMessageBuffer<&[u8; 10]> =
-            RouteMessageBuffer::new(recv_buf.as_array().unwrap());
-
-        if let Ok(rtm) = RouteMessage::parse(&buf) {
-            for attr in rtm.attributes.to_owned() {
-                match attr {
-                    RouteAttribute::Gateway(addr) => {
-                        if let RouteAddress::Inet6(a) = addr {
-                            return Ok(a);
-                        } else {
-                            info!("gateway address wasn't ipv6");
+    for res in recv {
+        let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
+        if let NlTypeWrapper::Rtm(_) = rtm.nl_type() {
+            if let Some(payload) = rtm.get_payload() {
+                for attr in payload.rtattrs().iter() {
+                    match attr.rta_type() {
+                        Rta::Oif => {
+                            // are attributes just buffers of bytes with a length equal
+                            // to the data size of the attribute?
+                            // who says its little endian
+                            thisifi = u32::from_le_bytes(
+                                attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
+                            );
+                        }
+                        Rta::Dst => {
+                            // dest is used to detect link local in the c code
+                            // dest is an address, we check the first bit of it to see if its a local prefix
+                            // we should add a dest variable that will keep track fo the dest we are sent
+                            // and it will get overriden by the last attribute. so we should do the check outside of the attribute loop
+                            dest = Ipv6Addr::from_octets(
+                                attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
+                            );
+                        }
+                        Rta::Multipath => {}
+                        _ => {
+                            // we don't care about that attribute
                             continue;
                         }
                     }
-                    _ => {}
+                }
+                // we didn't get an oif attribute, or the one we got was the loopback
+                if thisifi == 0 || thisifi == 1 {
+                    continue;
+                }
+
+                // dont know if this check is equal to what the c code does
+                if dest.is_loopback() {
+                    continue;
+                }
+
+                if *payload.rtm_dst_len() == 0 {
+                    defifi = thisifi
+                } else {
+                    anyifi = thisifi
                 }
             }
-        } else {
-            // find a way to still have access to the error
-            error!("failed to parse the message as a netlink route message",);
-            continue;
         }
     }
+
+    if defifi != 0 {
+        return Ok(defifi);
+    }
+    if anyifi != 0 {
+        return Ok(anyifi);
+    }
+    return Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "there is no interface index with a default route in the main route table",
+    ));
+}
+
+pub fn nl_get_default_gw_v6(nl_sock: &NlRouter, iface_idx: u32) -> Result<Ipv6Addr, io::Error> {
+    let oif_attr = RtattrBuilder::default()
+        .rta_type(Rta::Oif)
+        .rta_payload(iface_idx)
+        .build()
+        .unwrap();
+    let mut attrs = RtBuffer::new();
+    attrs.push(oif_attr);
+
+    let rtmsg = RtmsgBuilder::default()
+        .rtm_family(RtAddrFamily::Inet6)
+        .rtm_dst_len(0)
+        .rtm_src_len(0)
+        .rtm_tos(0)
+        .rtm_table(RtTable::Main)
+        .rtm_protocol(Rtprot::Unspec)
+        .rtm_scope(RtScope::Universe)
+        .rtm_type(Rtn::Unspec)
+        .rtattrs(attrs)
+        .build()
+        .unwrap();
+
+    // should i add the request flag on the other socket send too ?
+    let recv = nl_sock
+        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::REQUEST, NlPayload::Payload(rtmsg))
+        .unwrap();
+
+    for res in recv {
+        let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
+        if let NlTypeWrapper::Rtm(_) = rtm.nl_type() {
+            if let Some(payload) = rtm.get_payload() {
+                // a loop over attributes to do the same logic
+                for attr in payload.rtattrs().iter() {
+                    match attr.rta_type() {
+                        Rta::Gateway => {
+                            let gw_addr = Ipv6Addr::from_octets(
+                                attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
+                            );
+                            return Ok(gw_addr);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    return Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "found no message with a gateway attribute for interface index",
+    ));
 }
 
 pub struct Ipv4Conf {
