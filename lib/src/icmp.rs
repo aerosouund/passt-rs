@@ -129,7 +129,7 @@ pub fn handle_icmp4_packet(
         flow.ping.socket_fd,
         v4packet.payload(),
         &addr,
-        MsgFlags::MSG_CTRUNC, // should be nosignal
+        MsgFlags::MSG_NOSIGNAL, // should be nosignal
     )?;
     Ok(new_conn)
 }

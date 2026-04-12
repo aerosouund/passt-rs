@@ -17,3 +17,6 @@ serde = { version = "1.0.228", features = ["derive", "rc"] }
 clap = "4.5.56"
 netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.29.0"
+linux-raw-sys = { version = "0.12.1", features = ["netlink"] }
+rtnetlink = "0.20.0"
+neli = "0.7.4"
