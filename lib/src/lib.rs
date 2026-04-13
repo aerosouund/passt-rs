@@ -20,9 +20,6 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 
-use pnet::packet::icmpv6::ndp::{MutableRouterAdvertPacket, NdpOption, NdpOptionTypes};
-use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types, MutableIcmpv6Packet};
-
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
 use crate::muxer::ConnEnum;
@@ -33,6 +30,7 @@ pub mod flow;
 pub mod fwd;
 pub mod icmp;
 pub mod muxer;
+pub mod netlink;
 pub mod udp;
 
 pub const MAX_FRAME: usize = 65535 + 4;
@@ -74,13 +72,17 @@ pub fn handle_packets(
 
             EtherTypes::Ipv6 => {
                 if let Some(v6packet) = Ipv6Packet::owned(p.payload().to_vec()) {
-                    tap_handle_v6(conf, v6packet, reg, conn_map).map_err(|e| error!("{}", e));
+                    if let Err(e) = tap_handle_v6(conf, v6packet, reg, conn_map) {
+                        error!("{}", e);
+                    };
                 }
             }
 
             EtherTypes::Ipv4 => {
                 if let Some(v4packet) = Ipv4Packet::owned(p.payload().to_vec()) {
-                    tap_handle_v4(conf, v4packet, reg, conn_map).map_err(|e| error!("{}", e));
+                    if let Err(e) = tap_handle_v4(conf, v4packet, reg, conn_map) {
+                        error!("{}", e);
+                    };
                 }
             }
 
