@@ -34,7 +34,7 @@ fn main() -> io::Result<()> {
 
     conn_map.insert(Token(0), ConnEnum::SocketListener(listener));
 
-    let mut c = Conf::default(); // todo: parse from arguments
+    let mut c = Conf::init().unwrap(); // todo: parse from arguments
 
     let mut events = Events::with_capacity(16);
     loop {

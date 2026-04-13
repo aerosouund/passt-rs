@@ -33,6 +33,7 @@ pub mod flow;
 pub mod fwd;
 pub mod icmp;
 pub mod muxer;
+pub mod netlink;
 pub mod udp;
 
 pub const MAX_FRAME: usize = 65535 + 4;
