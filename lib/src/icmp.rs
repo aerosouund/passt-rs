@@ -135,7 +135,7 @@ pub fn handle_icmp4_packet(
         flow.ping.socket_fd,
         v4packet.payload(),
         &addr,
-        MsgFlags::MSG_CTRUNC, // should be nosignal
+        MsgFlags::MSG_NOSIGNAL, // should be nosignal
     )?;
     Ok(new_conn)
 }
@@ -241,40 +241,8 @@ fn ndp_na(conf: &Conf, dest: Ipv6Addr, addr: Ipv6Addr) -> Result<(), IcmpError> 
 }
 
 fn ndp_ra(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
-    /*
-     * 	struct ndp_ra ra = {
-        .ih = {
-            .icmp6_type		= RA,
-            .icmp6_code		= 0,
-            .icmp6_hop_limit	= 255,
-            /* RFC 8319 */
-            .icmp6_rt_lifetime	= htons_constant(RT_LIFETIME),
-            .icmp6_addrconf_managed	= 1,
-        },
-        .prefix_info = {
-            .header = {
-                .type		= OPT_PREFIX_INFO,
-                .len		= 4,
-            },
-            .prefix_len		= 64,
-            .prefix_flags		= 0xc0,	/* prefix flags: L, A */
-            .valid_lifetime		= ~0U,
-            .pref_lifetime		= ~0U,
-        },
-        .prefix = c->ip6.addr,
-        .source_ll = {
-            .header = {
-                .type		= OPT_SRC_L2_ADDR,
-                .len		= 1,
-            },
-        },
-    };
-     */
-
     let mut router_adv = MutableRouterAdvertPacket::new(&mut []).unwrap();
     router_adv.set_hop_limit(255);
-
-    let prefix = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0); // need to instead get the ip6 from the config
 
     let mut prefix_opt_data = Vec::with_capacity(32);
     prefix_opt_data.push(64);
@@ -282,7 +250,7 @@ fn ndp_ra(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&0u32.to_be_bytes());
-    prefix_opt_data.extend_from_slice(&prefix.octets());
+    prefix_opt_data.extend_from_slice(&conf.ip6.addr.octets());
     let prefix_opt = NdpOption {
         option_type: NdpOptionTypes::PrefixInformation,
         length: 32,
