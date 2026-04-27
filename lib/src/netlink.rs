@@ -7,8 +7,8 @@ use neli::rtnl::{Ifaddrmsg, IfaddrmsgBuilder, RtattrBuilder, Rtmsg, RtmsgBuilder
 use neli::types::RtBuffer;
 use std::io::Read;
 use std::net::IpAddr;
+use thiserror::Error;
 
-use log::{error, info};
 use neli::nl::{NlPayload, Nlmsghdr};
 
 use std::io;
@@ -19,10 +19,27 @@ pub struct IpScopes {
     pub link_local_addr: IpNet,
 }
 
-enum InitConfError {}
+#[derive(Debug, Error)]
+pub enum NetlinkError {
+    #[error("invalid ip length. should be 4 or 16 bytes")]
+    InvalidIpLength,
+    #[error("failed to get packet attribute")]
+    GetAttributeError,
+    #[error("invalid address family")]
+    InvalidAddressFamily,
+    #[error("error reading ip address: {0}")]
+    ReadIp(#[from] io::Error),
+    #[error("there is no interface index with a default route in the main route table")]
+    NoIfaceWithDefaultRoute,
+    #[error("found no message with a gateway attribute for interface index")]
+    NoGatewayAttribute,
+}
 
 #[allow(unused_assignments)]
-pub fn nl_get_exit_ifi(nl_sock: &NlRouter, address_family: RtAddrFamily) -> Result<u32, io::Error> {
+pub fn nl_get_exit_ifi(
+    nl_sock: &NlRouter,
+    address_family: RtAddrFamily,
+) -> Result<u32, NetlinkError> {
     let (mut thisifi, mut defifi, mut anyifi) = (0, 0, 0);
     let mut dest = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // placeholder
 
@@ -79,13 +96,7 @@ pub fn nl_get_exit_ifi(nl_sock: &NlRouter, address_family: RtAddrFamily) -> Resu
                                     ));
                                 }
                                 _ => {
-                                    return Err(io::Error::new(
-                                        io::ErrorKind::InvalidData,
-                                        format!(
-                                            "invalid address family was passed {:?}",
-                                            address_family
-                                        ),
-                                    ));
+                                    return Err(NetlinkError::InvalidAddressFamily);
                                 }
                             }
                         }
@@ -134,10 +145,7 @@ pub fn nl_get_exit_ifi(nl_sock: &NlRouter, address_family: RtAddrFamily) -> Resu
     if anyifi != 0 {
         return Ok(anyifi);
     }
-    return Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "there is no interface index with a default route in the main route table",
-    ));
+    return Err(NetlinkError::NoIfaceWithDefaultRoute);
 }
 
 // this function will return an enum that contains the address and the prefix
@@ -148,7 +156,7 @@ pub fn nl_get_addr(
     nl_sock: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
-) -> Result<Option<IpScopes>, io::Error> {
+) -> Result<Option<IpScopes>, NetlinkError> {
     let mut max_prefix = 0;
     let mut ipscopes = {
         match address_family {
@@ -161,7 +169,7 @@ pub fn nl_get_addr(
                 link_local_addr: IpNet::V6(Ipv6Net::new_assert(Ipv6Addr::UNSPECIFIED, 0)),
             },
             _ => {
-                return Err(io::ErrorKind::BrokenPipe.into());
+                return Err(NetlinkError::InvalidAddressFamily);
             }
         }
     };
@@ -201,23 +209,25 @@ pub fn nl_get_addr(
                 {
                     if ip_bytes.len() == 4 {
                         let mut bytes = [0u8; 4];
-                        ip_bytes.read_exact(&mut bytes)?;
+                        ip_bytes
+                            .read_exact(&mut bytes)
+                            .map_err(NetlinkError::ReadIp)?;
                         let a = Ipv4Addr::from(u32::from_ne_bytes(bytes).to_be());
 
                         IpNet::from(Ipv4Net::new(a, current_prefix_length).unwrap())
                     } else if ip_bytes.len() == 16 {
                         let mut bytes = [0u8; 16];
-                        ip_bytes.read_exact(&mut bytes)?;
+                        ip_bytes
+                            .read_exact(&mut bytes)
+                            .map_err(NetlinkError::ReadIp)?;
                         let a = Ipv6Addr::from(u128::from_ne_bytes(bytes).to_be());
 
                         IpNet::from(Ipv6Net::new(a, current_prefix_length).unwrap())
                     } else {
-                        // todo: return an error, make this right
-                        return Err(io::ErrorKind::BrokenPipe.into());
+                        return Err(NetlinkError::InvalidIpLength);
                     }
                 } else {
-                    // todo: return an error, make this right
-                    return Err(io::ErrorKind::BrokenPipe.into());
+                    return Err(NetlinkError::GetAttributeError);
                 }
             };
             // move this address to return address because its the most specific one we saw up until now
@@ -240,7 +250,7 @@ pub fn nl_get_default_gw(
     nl_sock: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
-) -> Result<Vec<u8>, io::Error> {
+) -> Result<Vec<u8>, NetlinkError> {
     let oif_attr = RtattrBuilder::default()
         .rta_type(Rta::Oif)
         .rta_payload(iface_idx)
@@ -280,13 +290,7 @@ pub fn nl_get_default_gw(
                                 return Ok(attr.rta_payload().as_ref()[0..16].try_into().unwrap());
                             }
                             _ => {
-                                return Err(io::Error::new(
-                                    io::ErrorKind::InvalidData,
-                                    format!(
-                                        "invalid address family was passed {:?}",
-                                        address_family
-                                    ),
-                                ));
+                                return Err(NetlinkError::InvalidAddressFamily);
                             }
                         },
                         _ => {
@@ -298,8 +302,5 @@ pub fn nl_get_default_gw(
         }
     }
 
-    return Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "found no message with a gateway attribute for interface index",
-    ));
+    return Err(NetlinkError::NoGatewayAttribute);
 }
