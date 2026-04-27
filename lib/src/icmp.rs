@@ -11,16 +11,16 @@ use nix::sys::socket::{
     MsgFlags, SockFlag, SockProtocol, SockaddrIn, bind, sendto, setsockopt, socket, sockopt,
 };
 
+use pnet::packet::Packet;
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
     NeighborSolicitPacket,
 };
-use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types, MutableIcmpv6Packet};
+use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
-use pnet::packet::{MutablePacket, Packet};
 
 use crate::Conf;
 use crate::flow::{
@@ -135,7 +135,7 @@ pub fn handle_icmp4_packet(
         flow.ping.socket_fd,
         v4packet.payload(),
         &addr,
-        MsgFlags::MSG_NOSIGNAL, // should be nosignal
+        MsgFlags::MSG_NOSIGNAL,
     )?;
     Ok(new_conn)
 }
@@ -203,30 +203,11 @@ pub fn new_icmp_flow(
     // not sure if this insert maps to whats really in the c code
 }
 
-/*
-
-   struct ndp_na na = {
-  .ih = {
-   .icmp6_type		= NA,
-   .icmp6_code		= 0,
-   .icmp6_router		= 1,
-   .icmp6_solicited	= 1,
-   .icmp6_override		= 1,
- },
- .target_addr = *addr,
- .target_l2_addr = {
-   .header	= {
-     .type= OPT_TARGET_L2_ADDR,
-     .len= 1,
-    },
-  }
-   };
-
-
-* */
-
 fn ndp_na(conf: &Conf, dest: Ipv6Addr, addr: Ipv6Addr) -> Result<(), IcmpError> {
-    let mut neighbor_adv = MutableNeighborAdvertPacket::new(&mut []).unwrap();
+    // 8 is an arbitrary number for the option length. we need to verify that
+    let mut na_buf = vec![0u8; MutableNeighborAdvertPacket::minimum_packet_size() + 8];
+    let mut neighbor_adv = MutableNeighborAdvertPacket::new(&mut na_buf).unwrap();
+
     neighbor_adv.set_target_addr(addr);
     let l2_opt = NdpOption {
         option_type: NdpOptionTypes::TargetLLAddr,
@@ -234,16 +215,22 @@ fn ndp_na(conf: &Conf, dest: Ipv6Addr, addr: Ipv6Addr) -> Result<(), IcmpError> 
         data: conf.tap_mac.to_vec(),
     };
     neighbor_adv.set_options(&[l2_opt]);
-    let mut reply = MutableIcmpv6Packet::new(&mut []).unwrap();
-    let mut v6reply = MutableIpv6Packet::new(reply.packet_mut()).unwrap();
+    neighbor_adv.set_flags(0b111); // R=1, S=1, O=1
+
+    let mut v6_packet_vec =
+        vec![0u8; MutableIpv6Packet::minimum_packet_size() + neighbor_adv.packet().len()];
+
+    let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
+    v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
+    v6reply.set_payload_length(neighbor_adv.packet().len() as u16);
+    v6reply.set_payload(neighbor_adv.packet());
+    v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
+
     Ok(())
 }
 
 fn ndp_ra(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
-    let mut router_adv = MutableRouterAdvertPacket::new(&mut []).unwrap();
-    router_adv.set_hop_limit(255);
-
     let mut prefix_opt_data = Vec::with_capacity(32);
     prefix_opt_data.push(64);
     prefix_opt_data.push(0xC0);
@@ -251,26 +238,37 @@ fn ndp_ra(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&0u32.to_be_bytes());
     prefix_opt_data.extend_from_slice(&conf.ip6.addr.octets());
-    let prefix_opt = NdpOption {
-        option_type: NdpOptionTypes::PrefixInformation,
-        length: 32,
-        data: prefix_opt_data,
-    };
 
-    // should be our mac address obtained from the config also
-    let ll_opt = NdpOption {
-        option_type: NdpOptionTypes::SourceLLAddr,
-        length: 1,
-        data: conf.tap_mac.to_vec(),
-    };
-    // where is the prefix information field on this packet type ?
-    router_adv.set_options(&[prefix_opt, ll_opt]);
+    // build the options vector
+    let options = [
+        NdpOption {
+            option_type: NdpOptionTypes::PrefixInformation,
+            length: 4,
+            data: prefix_opt_data,
+        },
+        NdpOption {
+            option_type: NdpOptionTypes::SourceLLAddr,
+            length: 1,
+            data: conf.tap_mac.to_vec(),
+        },
+    ];
+    // 32 and eight are two constants we are unsure of, they are the theoretical size of the
+    // prefix opt (32) and the source link local opt (8). we need to verify them though
+    let mut buf = vec![0u8; MutableRouterAdvertPacket::minimum_packet_size() + 32 + 8];
+    let mut router_adv = MutableRouterAdvertPacket::new(&mut buf).unwrap();
+    router_adv.set_hop_limit(255);
+    router_adv.set_options(&options);
 
-    // do we need this or are we able to directly wrap the ndp packet into the ip6 packet
-    let mut reply = MutableIcmpv6Packet::new(&mut []).unwrap();
+    let mut v6_packet_vec =
+        vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
-    let mut v6reply = MutableIpv6Packet::new(reply.packet_mut()).unwrap();
-    // v6reply.set_source(val); // what should this be ?
+    let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
+    v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
+    v6reply.set_payload_length(router_adv.packet().len() as u16);
+    v6reply.set_payload(router_adv.packet());
+    v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
+
+    // perform actual sending
     Ok(())
 }

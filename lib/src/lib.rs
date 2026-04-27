@@ -228,6 +228,7 @@ pub fn handle_tap_ethernet(
         })?) as usize;
 
         // let l2len = usize::from_be_bytes(packet_size);
+        // todo: use a cursor here
         if l2len > MAX_FRAME {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
