@@ -1,9 +1,8 @@
-use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
-use dhcproto::{Decodable, Encodable, Encoder};
-use ipnet::Ipv4Net;
+use icmp::handle_icmp6_packet;
 use log::error;
 use mio::Registry;
 use mio::net::UnixStream;
+use muxer::ConnEnum;
 use muxer::StreamConnCtx;
 use pnet::packet::Packet;
 use pnet::packet::arp::ArpOperation;
@@ -15,41 +14,47 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::udp::UdpPacket;
 use std::collections::HashMap;
-use std::fmt;
-use std::io;
 use std::io::{Read, Write};
-use std::net::Ipv4Addr;
+use thiserror::Error;
+use udp::DhcpError;
+use udp::dhcp;
 
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
-use crate::muxer::ConnEnum;
-use crate::udp::tap_udp4_sent;
 
 pub mod conf;
 pub mod flow;
 pub mod fwd;
 pub mod icmp;
 pub mod muxer;
+pub mod ndp;
 pub mod netlink;
 pub mod udp;
 
 pub const MAX_FRAME: usize = 65535 + 4;
 
-#[derive(Debug)]
-pub struct HandlePacketError(pub String);
-
-impl std::fmt::Display for HandlePacketError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+#[derive(Debug, Error)]
+pub enum HandlePacketError {
+    #[error("icmp error: {0}")]
+    Icmp(#[from] IcmpError),
+    #[error("dhcp error: {0}")]
+    Dhcp(#[from] DhcpError),
+    #[error("malformed packet")]
+    MalformedPacket,
 }
 
-impl std::error::Error for HandlePacketError {}
-
-impl From<IcmpError> for HandlePacketError {
-    fn from(value: IcmpError) -> Self {
-        HandlePacketError(value.to_string())
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum TapError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("failed to parse packet size: {0}")]
+    PacketSizeParse(#[from] std::array::TryFromSliceError),
+    #[error("frame too large: {0} bytes exceeds max {MAX_FRAME}")]
+    FrameTooLarge(usize),
+    #[error("malformed ethernet frame")]
+    MalformedFrame,
+    #[error("incomplete frame, {0} bytes remaining")]
+    IncompleteFrame(usize),
 }
 
 #[allow(non_upper_case_globals)]
@@ -92,14 +97,20 @@ pub fn handle_packets(
     Ok(())
 }
 
+// todo: think of a better structure to sequence how we handle icmp and its
+// child protocols
 fn tap_handle_v6(
     conf: &Conf,
     v6packet: Ipv6Packet<'static>,
-    reg: &Registry,
-    conn_map: &mut HashMap<mio::Token, ConnEnum>,
+    // todo: is there any scenario will we need the registry and the connection map?
+    _reg: &Registry,
+    _conn_map: &mut HashMap<mio::Token, ConnEnum>,
 ) -> Result<(), HandlePacketError> {
     match v6packet.get_next_header() {
-        IpNextHeaderProtocols::Icmpv6 => {}
+        IpNextHeaderProtocols::Icmpv6 => {
+            handle_icmp6_packet(conf, v6packet)?;
+        }
+
         _ => {}
     }
     Ok(())
@@ -124,62 +135,8 @@ fn tap_handle_v4(
             let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
             // dhcp ? but again, we could send whatever on port 67 but hey
             if udp_packet.get_destination() == 67 {
-                let mut dhcp_msg = match Message::decode(&mut Decoder::new(v4packet.payload())) {
-                    Ok(msg) => msg,
-                    Err(_) => {
-                        return Err(HandlePacketError("error parsing dhcp packet".to_string()));
-                    }
-                };
-
-                // copy the options outside then set them back to the message at the end (zero copy my ass i guess)
-                let mut opts = dhcp_msg.opts_mut().clone();
-                // i wish i can get rid of this clone while reading the message type. i don't need to hold a reference to opts
-                let msgtype = opts
-                    .get(dhcproto::v4::OptionCode::MessageType)
-                    .unwrap()
-                    .clone();
-
-                if let DhcpOption::MessageType(msg_type) = msgtype {
-                    let response_type = match msg_type {
-                        MessageType::Discover => {
-                            if opts.contains(OptionCode::RapidCommit) {
-                                MessageType::Offer
-                            } else {
-                                MessageType::Ack
-                            }
-                        }
-                        MessageType::Request => MessageType::Ack,
-                        _ => {
-                            return Err(HandlePacketError("invalid dhcp message type".to_string()));
-                        }
-                    };
-                    opts.insert(DhcpOption::MessageType(response_type));
-                };
-                let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
-
-                dhcp_msg.set_yiaddr(conf.ip4.addr);
-                opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
-                opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
-                opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
-
-                if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
-                    opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
-                        Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
-                        conf.ip4.guest_gw.clone(),
-                    )]));
-                }
-
-                // eventually
-                dhcp_msg.set_opts(opts);
-                let mut msg_buf = Vec::new();
-                let mut enc = Encoder::new(&mut msg_buf);
-                dhcp_msg.encode(&mut enc).unwrap();
-
-                // do we build a new packet or use the existing one ?
-                tap_udp4_sent(conf, conf.ip4.our_tap_addr, 67, conf.ip4.addr, 68, msg_buf).unwrap();
+                dhcp(conf, v4packet);
             }
-
-            // dhcp ?
         }
         IpNextHeaderProtocols::Tcp => {}
         _ => {}
@@ -211,7 +168,7 @@ fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static
 
 pub fn handle_tap_ethernet(
     ctx: &mut StreamConnCtx,
-) -> Result<Vec<EthernetPacket<'static>>, io::Error> {
+) -> Result<Vec<EthernetPacket<'static>>, TapError> {
     let mut buf = [0u8; MAX_FRAME];
     let mut v4_packets: Vec<EthernetPacket<'static>> = Vec::new();
     let mut offset = 0;
@@ -222,18 +179,16 @@ pub fn handle_tap_ethernet(
     let mut n = ctx.stream.read(&mut buf[offset..])?;
 
     while n > 4 {
-        let l2len = u32::from_be_bytes(buf[offset..offset + 4].try_into().map_err(|e| {
-            error!("failed to parse packet size: {e}");
-            io::Error::new(io::ErrorKind::InvalidData, "failed to parse packet size")
-        })?) as usize;
+        let l2len = u32::from_be_bytes(
+            buf[offset..offset + 4]
+                .try_into()
+                .map_err(TapError::PacketSizeParse)?,
+        ) as usize;
 
         // let l2len = usize::from_be_bytes(packet_size);
         // todo: use a cursor here
         if l2len > MAX_FRAME {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Frame too large",
-            ));
+            return Err(TapError::FrameTooLarge(l2len));
         }
         offset += 4;
         n -= 4;
