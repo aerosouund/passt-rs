@@ -9,13 +9,12 @@ use mio::{Events, Interest, Poll, Token};
 
 use conf::Args;
 use std::collections::HashMap;
-use std::io::{self};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 mod conf;
 
-fn main() -> io::Result<()> {
+fn main() -> anyhow::Result<()> {
     unsafe {
         setup_sig_handler(exit_handler as *const () as usize, libc::SIGTERM);
         setup_sig_handler(exit_handler as *const () as usize, libc::SIGQUIT);

@@ -1,10 +1,15 @@
 use crate::conf::{Conf, Mode};
+use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
+use dhcproto::{Decodable, Encodable, Encoder};
+use ipnet::Ipv4Net;
 use nix::errno::Errno;
 use nix::sys::socket::{ControlMessage, MsgFlags, SockaddrIn, sendmsg};
+use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
 use std::fmt;
 use std::io::IoSlice;
 use std::net::Ipv4Addr;
+use thiserror::Error;
 
 #[derive(Debug)]
 pub enum UdpError {
@@ -28,6 +33,14 @@ impl std::error::Error for UdpError {}
 
 pub fn handle_udp() -> Result<(), UdpError> {
     Ok(())
+}
+
+#[derive(Debug, Error)]
+pub enum DhcpError {
+    #[error("invalid packet")]
+    InvalidPacket,
+    #[error("invalid packet type")]
+    InvalidType,
 }
 
 // todo: add results and errors and handle them
@@ -74,4 +87,61 @@ fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
         }
         Mode::Pasta => Ok(()),
     }
+}
+
+pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), DhcpError> {
+    let mut dhcp_msg = match Message::decode(&mut Decoder::new(v4packet.payload())) {
+        Ok(msg) => msg,
+        Err(_) => {
+            return Err(DhcpError::InvalidPacket);
+        }
+    };
+
+    // copy the options outside then set them back to the message at the end (zero copy my ass i guess)
+    let mut opts = dhcp_msg.opts_mut().clone();
+    // i wish i can get rid of this clone while reading the message type. i don't need to hold a reference to opts
+    let msgtype = opts
+        .get(dhcproto::v4::OptionCode::MessageType)
+        .unwrap()
+        .clone();
+
+    if let DhcpOption::MessageType(msg_type) = msgtype {
+        let response_type = match msg_type {
+            MessageType::Discover => {
+                if opts.contains(OptionCode::RapidCommit) {
+                    MessageType::Offer
+                } else {
+                    MessageType::Ack
+                }
+            }
+            MessageType::Request => MessageType::Ack,
+            _ => {
+                return Err(DhcpError::InvalidType);
+            }
+        };
+        opts.insert(DhcpOption::MessageType(response_type));
+    };
+    let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
+
+    dhcp_msg.set_yiaddr(conf.ip4.addr);
+    opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
+    opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
+    opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
+
+    if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
+        opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
+            Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
+            conf.ip4.guest_gw.clone(),
+        )]));
+    }
+
+    // eventually
+    dhcp_msg.set_opts(opts);
+    let mut msg_buf = Vec::new();
+    let mut enc = Encoder::new(&mut msg_buf);
+    dhcp_msg.encode(&mut enc).unwrap();
+
+    // do we build a new packet or use the existing one ?
+    tap_udp4_sent(conf, conf.ip4.our_tap_addr, 67, conf.ip4.addr, 68, msg_buf).unwrap();
+    Ok(())
 }
