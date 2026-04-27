@@ -1,21 +1,26 @@
+use crate::netlink::NetlinkError;
 use clap::ValueEnum;
 use ipnet::IpNet;
 use neli::consts::rtnl::RtAddrFamily;
 use neli::consts::socket::NlFamily;
 use neli::router::synchronous::NlRouter;
 use neli::utils::Groups;
-use pnet::util::MacAddr;
+use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
 
 use crate::netlink::{nl_get_addr, nl_get_default_gw, nl_get_exit_ifi};
-use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
 const TAP_MAC: [u8; 6] = [0x9a, 0x55, 0x9a, 0x55, 0x9a, 0x55];
 
+#[derive(Error, Debug)]
+pub enum InitConfError {
+    #[error("netlink error: {0}")]
+    NetlinkError(#[from] NetlinkError),
+}
 pub struct Conf {
     pub tap_fd: i32,
     pub nl_socket: NlRouter,
@@ -37,7 +42,7 @@ impl Conf {
         }
     }
 
-    pub fn init() -> Result<Self, std::io::Error> {
+    pub fn init() -> Result<Self, InitConfError> {
         let (nl_socket, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
         let ip6conf = ipv6_conf(&nl_socket)?;
         let ip4conf = ipv4_conf(&nl_socket)?;
@@ -68,7 +73,8 @@ impl Default for Ipv4Conf {
     }
 }
 
-pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, io::Error> {
+// todo: should we make specific error types for ipv6 and ipv4 ?
+pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, InitConfError> {
     let ifi = nl_get_exit_ifi(&nl_socket, RtAddrFamily::Inet6)?;
 
     let gatewayv6 = nl_get_default_gw(&nl_socket, ifi, RtAddrFamily::Inet6)?;
@@ -90,7 +96,7 @@ pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, io::Error> {
     Ok(conf)
 }
 
-pub fn ipv4_conf(nl_socket: &NlRouter) -> Result<Ipv4Conf, io::Error> {
+pub fn ipv4_conf(nl_socket: &NlRouter) -> Result<Ipv4Conf, InitConfError> {
     let ifi = nl_get_exit_ifi(&nl_socket, RtAddrFamily::Inet)?;
 
     let gatewayv4 = nl_get_default_gw(&nl_socket, ifi, RtAddrFamily::Inet)?;
