@@ -1,14 +1,21 @@
 use std::net::Ipv6Addr;
 
+use libc::iovec;
 use pnet::packet::Packet;
+use pnet::packet::ethernet::EtherType;
+use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ethernet::MutableEthernetPacket;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 
+use crate::TapError;
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
+use crate::utils::send_ether;
 
 pub(crate) fn neighbour_advert(
     conf: &Conf,
@@ -23,7 +30,7 @@ pub(crate) fn neighbour_advert(
     let l2_opt = NdpOption {
         option_type: NdpOptionTypes::TargetLLAddr,
         length: 1,
-        data: conf.tap_mac.to_vec(),
+        data: conf.our_tap_mac.octets().to_vec(),
     };
     neighbor_adv.set_options(&[l2_opt]);
     neighbor_adv.set_flags(0b111); // R=1, S=1, O=1
@@ -38,7 +45,7 @@ pub(crate) fn neighbour_advert(
     v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
 
-    Ok(())
+    send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }
 
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
@@ -60,7 +67,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
         NdpOption {
             option_type: NdpOptionTypes::SourceLLAddr,
             length: 1,
-            data: conf.tap_mac.to_vec(),
+            data: conf.our_tap_mac.octets().to_vec(),
         },
     ];
     // 32 and eight are two constants we are unsure of, they are the theoretical size of the
@@ -80,6 +87,5 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
 
-    // perform actual sending
-    Ok(())
+    send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }

@@ -20,12 +20,12 @@ use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 
-use crate::Conf;
 use crate::flow::{
     FLOWATSIDX, FLOWS, Flow, FlowType, Flowside, PifType, StateIdx, flow_initiate_af,
 };
 use crate::fwd::fwd_nat_from_tap;
 use crate::muxer::{ConnEnum, StreamConnCtx};
+use crate::{Conf, TapError};
 
 #[derive(Debug, Error)]
 pub enum IcmpError {
@@ -37,6 +37,8 @@ pub enum IcmpError {
     EpollError(String),
     #[error("invalid state index built from packet")]
     InvalidSidxError,
+    #[error("tap error: {0}")]
+    Tap(#[from] TapError),
 }
 
 pub fn handle_icmp6_packet(conf: &Conf, v6packet: Ipv6Packet<'static>) -> Result<(), IcmpError> {

@@ -5,6 +5,7 @@ use neli::consts::rtnl::RtAddrFamily;
 use neli::consts::socket::NlFamily;
 use neli::router::synchronous::NlRouter;
 use neli::utils::Groups;
+use pnet::util::MacAddr;
 use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
-const TAP_MAC: [u8; 6] = [0x9a, 0x55, 0x9a, 0x55, 0x9a, 0x55];
 
 #[derive(Error, Debug)]
 pub enum InitConfError {
@@ -27,7 +27,8 @@ pub struct Conf {
     pub mode: Mode,
     pub ip4: Ipv4Conf,
     pub ip6: Ipv6Conf,
-    pub tap_mac: [u8; 6],
+    pub our_tap_mac: MacAddr,
+    pub guest_mac: MacAddr,
 }
 
 impl Conf {
@@ -38,7 +39,8 @@ impl Conf {
             mode: Mode::Passt,
             ip4: Ipv4Conf::default(),
             ip6: Ipv6Conf::default(),
-            tap_mac: TAP_MAC,
+            our_tap_mac: MacAddr::new(0x9a, 0x55, 0x9a, 0x55, 0x9a, 0x55),
+            guest_mac: MacAddr::default(),
         }
     }
 

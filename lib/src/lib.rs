@@ -9,10 +9,12 @@ use pnet::packet::arp::ArpOperation;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ethernet::MutableEthernetPacket;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::udp::UdpPacket;
+use pnet::util::MacAddr;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use thiserror::Error;
@@ -30,8 +32,10 @@ pub mod muxer;
 pub mod ndp;
 pub mod netlink;
 pub mod udp;
+pub mod utils;
 
 pub const MAX_FRAME: usize = 65535 + 4;
+const MIN_FRAME: usize = MutableEthernetPacket::minimum_packet_size();
 
 #[derive(Debug, Error)]
 pub enum HandlePacketError {
@@ -49,8 +53,8 @@ pub enum TapError {
     Io(#[from] std::io::Error),
     #[error("failed to parse packet size: {0}")]
     PacketSizeParse(#[from] std::array::TryFromSliceError),
-    #[error("frame too large: {0} bytes exceeds max {MAX_FRAME}")]
-    FrameTooLarge(usize),
+    #[error("invalid size: {0}, max ({MAX_FRAME}), min ({MIN_FRAME})")]
+    InvalidSize(usize),
     #[error("malformed ethernet frame")]
     MalformedFrame,
     #[error("incomplete frame, {0} bytes remaining")]
@@ -167,10 +171,13 @@ fn handle_arp_packet(packet_data: &mut Vec<u8>) -> Option<EthernetPacket<'static
     let final_packet = EthernetPacket::owned(arp_packet.packet().to_vec()).unwrap();
     Some(final_packet)
 }
+pub struct EthernetResult {
+    pub packets: Vec<EthernetPacket<'static>>,
+    pub observed_mac: MacAddr,
+}
 
-pub fn handle_tap_ethernet(
-    ctx: &mut StreamConnCtx,
-) -> Result<Vec<EthernetPacket<'static>>, TapError> {
+// this function needs to be able to control mac address
+pub fn handle_tap_ethernet(ctx: &mut StreamConnCtx) -> Result<EthernetResult, TapError> {
     let mut buf = [0u8; MAX_FRAME];
     let mut v4_packets: Vec<EthernetPacket<'static>> = Vec::new();
     let mut offset = 0;
@@ -179,6 +186,7 @@ pub fn handle_tap_ethernet(
         offset += ctx.partial_frame.len();
     }
     let mut n = ctx.stream.read(&mut buf[offset..])?;
+    let mut observed_mac = MacAddr::default();
 
     while n > 4 {
         let l2len = u32::from_be_bytes(
@@ -187,14 +195,18 @@ pub fn handle_tap_ethernet(
                 .map_err(TapError::PacketSizeParse)?,
         ) as usize;
 
-        // let l2len = usize::from_be_bytes(packet_size);
         // todo: use a cursor here
         if l2len > MAX_FRAME {
-            return Err(TapError::FrameTooLarge(l2len));
+            return Err(TapError::InvalidSize(l2len));
         }
         offset += 4;
         n -= 4;
         if let Some(packet) = EthernetPacket::owned(buf[offset..offset + l2len].to_vec()) {
+            let src = packet.get_source();
+            if observed_mac != src {
+                observed_mac = src
+            }
+
             v4_packets.push(packet);
         };
 
@@ -204,5 +216,8 @@ pub fn handle_tap_ethernet(
             ctx.partial_frame.clone_from_slice(&buf[offset..]);
         }
     }
-    Ok(v4_packets)
+    Ok(EthernetResult {
+        packets: v4_packets,
+        observed_mac,
+    })
 }

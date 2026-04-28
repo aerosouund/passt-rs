@@ -1,35 +1,22 @@
+use crate::TapError;
 use crate::conf::{Conf, Mode};
+use crate::utils::send_ether;
 use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
 use dhcproto::{Decodable, Encodable, Encoder};
 use ipnet::Ipv4Net;
-use nix::errno::Errno;
-use nix::sys::socket::{ControlMessage, MsgFlags, SockaddrIn, sendmsg};
+use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
-use std::fmt;
-use std::io::IoSlice;
 use std::net::Ipv4Addr;
 use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum UdpError {
+    #[error("sys error: {0}")]
     SysError(i32),
+    #[error("tap error: {0}")]
+    Tap(#[from] TapError),
 }
-impl std::fmt::Display for UdpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            UdpError::SysError(e) => write!(f, "sys error: {}", e),
-        }
-    }
-}
-
-impl From<Errno> for UdpError {
-    fn from(value: Errno) -> Self {
-        UdpError::SysError(value as i32)
-    }
-}
-
-impl std::error::Error for UdpError {}
 
 pub fn handle_udp() -> Result<(), UdpError> {
     Ok(())
@@ -56,37 +43,16 @@ pub fn tap_udp4_sent(
     let mut udp_packet = MutableUdpPacket::owned(msg).unwrap();
     udp_packet.set_source(srcport.to_be() as u16);
     udp_packet.set_destination(destport.to_be() as u16);
-    // udp_packet.set_checksum(val); optional. maybe ?
+    // udp_packet.set_checksum(val); // ammar: we need to compute packet checksums
 
+    // ammar: need to make sure if actually wrapping the udp packet in an ipv4 packet is needed here
     // does calling payload return the full packet or just the payload ? according to chatgpt its the whole
     // packet and in a format the os can handle but i am honestly not convinced
     let mut ip_packet = MutableIpv4Packet::new(udp_packet.payload_mut()).unwrap();
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
 
-    let ip_pkt_raw = ip_packet.packet();
-    let pkt_len: [u8; 1] = [ip_pkt_raw.len() as u8];
-    send_single(conf, &[IoSlice::new(&pkt_len), IoSlice::new(ip_pkt_raw)])
-}
-
-fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
-    // a switch on the mode
-    // transformation into an iovec
-    let s: Option<&SockaddrIn> = None;
-    match conf.mode {
-        Mode::Passt => {
-            let cmsgs: [ControlMessage<'_>; 0] = [];
-            sendmsg(
-                conf.tap_fd,
-                data,
-                &cmsgs,
-                MsgFlags::MSG_DONTWAIT | MsgFlags::MSG_NOSIGNAL,
-                s,
-            )?;
-            Ok(())
-        }
-        Mode::Pasta => Ok(()),
-    }
+    send_ether(conf, EtherTypes::Ipv4, ip_packet.payload()).map_err(UdpError::Tap)
 }
 
 pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), DhcpError> {

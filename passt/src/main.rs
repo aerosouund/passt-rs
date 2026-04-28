@@ -62,12 +62,15 @@ fn main() -> anyhow::Result<()> {
                     );
                 }
                 ConnEnum::Stream(ref mut stream_ctx) => {
-                    let mut packets = handle_tap_ethernet(stream_ctx)?;
+                    let mut eth_res = handle_tap_ethernet(stream_ctx)?;
+                    // set the guest mac address as the observed mac we saw from handling
+                    // the ethernet layer packets
+                    c.guest_mac = eth_res.observed_mac;
                     if let Err(e) = handle_packets(
                         &c,
                         poll.registry(),
                         stream_ctx.stream(),
-                        &mut packets,
+                        &mut eth_res.packets,
                         &mut conn_map,
                     ) {
                         error!("{}", e);
