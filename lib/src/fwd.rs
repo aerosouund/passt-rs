@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use crate::flow::{Flowside, PifType};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use std::net::Ipv4Addr;

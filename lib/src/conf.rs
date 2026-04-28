@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use crate::netlink::NetlinkError;
 use clap::ValueEnum;
 use ipnet::IpNet;

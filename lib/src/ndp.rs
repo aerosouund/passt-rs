@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use std::net::Ipv6Addr;
 
 use pnet::packet::Packet;

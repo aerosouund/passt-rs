@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use crate::TapError;
 use crate::conf::{Conf, Mode};
 use nix::sys::socket::{ControlMessage, MsgFlags, SockaddrIn, sendmsg};

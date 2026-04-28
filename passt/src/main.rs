@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 #![allow(non_upper_case_globals)]
 use clap::Parser;
 use libpasst::conf::Conf;

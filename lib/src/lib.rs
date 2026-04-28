@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use icmp::handle_icmp6_packet;
 use log::error;
 use mio::Registry;

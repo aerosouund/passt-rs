@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use std::os::fd::RawFd;
 use std::sync::{LazyLock, RwLock};
 use std::{collections::BTreeMap, net::Ipv4Addr};

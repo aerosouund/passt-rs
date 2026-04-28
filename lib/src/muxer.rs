@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use mio::net::{UnixListener, UnixStream};
 
 pub struct StreamConnCtx {
