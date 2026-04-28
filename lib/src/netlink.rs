@@ -133,11 +133,7 @@ pub fn nl_get_exit_ifi(
                         continue;
                     }
                 }
-                IpAddr::V6(ip6) => {
-                    if ip6.is_unicast_link_local() {
-                        continue;
-                    }
-                }
+                _ => {}
             }
 
             if *payload.rtm_dst_len() == 0 {
