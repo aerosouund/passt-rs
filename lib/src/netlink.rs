@@ -72,6 +72,14 @@ pub fn nl_get_exit_ifi(
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
+            eprintln!(
+                "dst_len={} table={:?} proto={:?} scope={:?} type={:?}",
+                payload.rtm_dst_len(),
+                payload.rtm_table(),
+                payload.rtm_protocol(),
+                payload.rtm_scope(),
+                payload.rtm_type(),
+            );
             for attr in payload.rtattrs().iter() {
                 match attr.rta_type() {
                     Rta::Oif => {
