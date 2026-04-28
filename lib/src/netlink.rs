@@ -43,7 +43,6 @@ pub fn nl_get_exit_ifi(
     address_family: RtAddrFamily,
 ) -> Result<u32, NetlinkError> {
     let (mut thisifi, mut defifi, mut anyifi) = (0, 0, 0);
-    let mut dest = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // placeholder
 
     let rtmsg = RtmsgBuilder::default()
         .rtm_family(address_family)
@@ -69,17 +68,11 @@ pub fn nl_get_exit_ifi(
 
     for res in recv {
         let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
+        let mut dest = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // placeholder
+
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
-            eprintln!(
-                "dst_len={} table={:?} proto={:?} scope={:?} type={:?}",
-                payload.rtm_dst_len(),
-                payload.rtm_table(),
-                payload.rtm_protocol(),
-                payload.rtm_scope(),
-                payload.rtm_type(),
-            );
             for attr in payload.rtattrs().iter() {
                 match attr.rta_type() {
                     Rta::Oif => {
@@ -133,7 +126,11 @@ pub fn nl_get_exit_ifi(
                         continue;
                     }
                 }
-                _ => {}
+                IpAddr::V6(ip6) => {
+                    if ip6.is_unicast_link_local() {
+                        continue;
+                    }
+                }
             }
 
             if *payload.rtm_dst_len() == 0 {
