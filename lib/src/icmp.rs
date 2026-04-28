@@ -118,6 +118,7 @@ pub fn handle_icmp4_packet(
     let addr = SockaddrIn::new(a, b, c, d, 0);
 
     // send packet
+    // ammar: replace this with send ether
     sendto(
         flow.ping.socket_fd,
         v4packet.payload(),

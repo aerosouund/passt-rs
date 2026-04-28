@@ -1,5 +1,5 @@
 use crate::TapError;
-use crate::conf::{Conf, Mode};
+use crate::conf::Conf;
 use crate::utils::send_ether;
 use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
 use dhcproto::{Decodable, Encodable, Encoder};

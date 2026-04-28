@@ -1,18 +1,13 @@
 use std::net::Ipv6Addr;
 
-use libc::iovec;
 use pnet::packet::Packet;
-use pnet::packet::ethernet::EtherType;
 use pnet::packet::ethernet::EtherTypes;
-use pnet::packet::ethernet::EthernetPacket;
-use pnet::packet::ethernet::MutableEthernetPacket;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 
-use crate::TapError;
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
 use crate::utils::send_ether;
