@@ -76,18 +76,18 @@ pub fn handle_packets(
             }
 
             EtherTypes::Ipv6 => {
-                if let Some(v6packet) = Ipv6Packet::owned(p.payload().to_vec()) {
-                    if let Err(e) = tap_handle_v6(conf, v6packet, reg, conn_map) {
-                        error!("{}", e);
-                    };
+                if let Some(v6packet) = Ipv6Packet::owned(p.payload().to_vec())
+                    && let Err(e) = tap_handle_v6(conf, v6packet, reg, conn_map)
+                {
+                    error!("{}", e);
                 }
             }
 
             EtherTypes::Ipv4 => {
-                if let Some(v4packet) = Ipv4Packet::owned(p.payload().to_vec()) {
-                    if let Err(e) = tap_handle_v4(conf, v4packet, reg, conn_map) {
-                        error!("{}", e);
-                    };
+                if let Some(v4packet) = Ipv4Packet::owned(p.payload().to_vec())
+                    && let Err(e) = tap_handle_v4(conf, v4packet, reg, conn_map)
+                {
+                    error!("{}", e);
                 }
             }
 
@@ -110,7 +110,8 @@ fn tap_handle_v6(
         IpNextHeaderProtocols::Icmpv6 => {
             handle_icmp6_packet(conf, v6packet)?;
         }
-
+        // this is here to disable the lint
+        IpNextHeaderProtocols::Ax25 => {}
         _ => {}
     }
     Ok(())
@@ -135,7 +136,8 @@ fn tap_handle_v4(
             let udp_packet = UdpPacket::new(v4packet.payload()).unwrap();
             // dhcp ? but again, we could send whatever on port 67 but hey
             if udp_packet.get_destination() == 67 {
-                dhcp(conf, v4packet);
+                // todo: handle this result
+                let _ = dhcp(conf, v4packet);
             }
         }
         IpNextHeaderProtocols::Tcp => {}
@@ -172,7 +174,7 @@ pub fn handle_tap_ethernet(
     let mut buf = [0u8; MAX_FRAME];
     let mut v4_packets: Vec<EthernetPacket<'static>> = Vec::new();
     let mut offset = 0;
-    if ctx.partial_frame.len() > 0 {
+    if !ctx.partial_frame.is_empty() {
         buf.clone_from_slice(ctx.partial_frame());
         offset += ctx.partial_frame.len();
     }
@@ -192,7 +194,7 @@ pub fn handle_tap_ethernet(
         }
         offset += 4;
         n -= 4;
-        if let Some(packet) = EthernetPacket::owned(buf[offset..offset + l2len].to_vec()).take() {
+        if let Some(packet) = EthernetPacket::owned(buf[offset..offset + l2len].to_vec()) {
             v4_packets.push(packet);
         };
 

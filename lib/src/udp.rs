@@ -66,7 +66,7 @@ pub fn tap_udp4_sent(
 
     let ip_pkt_raw = ip_packet.packet();
     let pkt_len: [u8; 1] = [ip_pkt_raw.len() as u8];
-    send_single(conf, &[IoSlice::new(&pkt_len), IoSlice::new(&ip_pkt_raw)])
+    send_single(conf, &[IoSlice::new(&pkt_len), IoSlice::new(ip_pkt_raw)])
 }
 
 fn send_single(conf: &Conf, data: &[IoSlice]) -> Result<(), UdpError> {
@@ -131,7 +131,7 @@ pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), Dhc
     if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
         opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
             Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
-            conf.ip4.guest_gw.clone(),
+            conf.ip4.guest_gw,
         )]));
     }
 

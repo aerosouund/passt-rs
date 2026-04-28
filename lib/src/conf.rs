@@ -75,16 +75,18 @@ impl Default for Ipv4Conf {
 
 // todo: should we make specific error types for ipv6 and ipv4 ?
 pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, InitConfError> {
-    let ifi = nl_get_exit_ifi(&nl_socket, RtAddrFamily::Inet6)?;
+    let ifi = nl_get_exit_ifi(nl_socket, RtAddrFamily::Inet6)?;
 
-    let gatewayv6 = nl_get_default_gw(&nl_socket, ifi, RtAddrFamily::Inet6)?;
-    let ipscopes = nl_get_addr(&nl_socket, ifi, RtAddrFamily::Inet6)?
+    let gatewayv6 = nl_get_default_gw(nl_socket, ifi, RtAddrFamily::Inet6)?;
+    let ipscopes = nl_get_addr(nl_socket, ifi, RtAddrFamily::Inet6)?
         .take()
         .unwrap();
 
-    let mut conf = Ipv6Conf::default();
-    conf.guest_gw = Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap());
-    conf.map_host_loopback = Ipv6Addr::from_octets(gatewayv6.try_into().unwrap());
+    let mut conf = Ipv6Conf {
+        guest_gw: Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap()),
+        map_host_loopback: Ipv6Addr::from_octets(gatewayv6.try_into().unwrap()),
+        ..Default::default()
+    };
 
     if let IpNet::V6(addrv6) = ipscopes.addr {
         conf.addr = addrv6.addr();
@@ -97,15 +99,17 @@ pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, InitConfError> {
 }
 
 pub fn ipv4_conf(nl_socket: &NlRouter) -> Result<Ipv4Conf, InitConfError> {
-    let ifi = nl_get_exit_ifi(&nl_socket, RtAddrFamily::Inet)?;
+    let ifi = nl_get_exit_ifi(nl_socket, RtAddrFamily::Inet)?;
 
-    let gatewayv4 = nl_get_default_gw(&nl_socket, ifi, RtAddrFamily::Inet)?;
-    let ipscopes = nl_get_addr(&nl_socket, ifi, RtAddrFamily::Inet)?
+    let gatewayv4 = nl_get_default_gw(nl_socket, ifi, RtAddrFamily::Inet)?;
+    let ipscopes = nl_get_addr(nl_socket, ifi, RtAddrFamily::Inet)?
         .take()
         .unwrap();
 
-    let mut conf = Ipv4Conf::default();
-    conf.guest_gw = Ipv4Addr::from_octets(gatewayv4.try_into().unwrap());
+    let mut conf = Ipv4Conf {
+        guest_gw: Ipv4Addr::from_octets(gatewayv4.try_into().unwrap()),
+        ..Default::default()
+    };
     if let IpNet::V4(addrv4) = ipscopes.addr {
         conf.addr = addrv4.addr();
     }

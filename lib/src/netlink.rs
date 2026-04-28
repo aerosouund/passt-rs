@@ -67,74 +67,73 @@ pub fn nl_get_exit_ifi(
 
     for res in recv {
         let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
-        if let NlTypeWrapper::Rtm(_) = rtm.nl_type() {
-            if let Some(payload) = rtm.get_payload() {
-                for attr in payload.rtattrs().iter() {
-                    match attr.rta_type() {
-                        Rta::Oif => {
-                            // are attributes just buffers of bytes with a length equal
-                            // to the data size of the attribute?
-                            // who says its little endian
-                            thisifi = u32::from_le_bytes(
-                                attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
-                            );
-                        }
-                        Rta::Dst => {
-                            // dest is used to detect link local in the c code
-                            // dest is an address, we check the first bit of it to see if its a local prefix
-                            // we should add a dest variable that will keep track fo the dest we are sent
-                            // and it will get overriden by the last attribute. so we should do the check outside of the attribute loop
-                            match address_family {
-                                RtAddrFamily::Inet6 => {
-                                    dest = std::net::IpAddr::V6(Ipv6Addr::from_octets(
-                                        attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
-                                    ));
-                                }
-                                RtAddrFamily::Inet => {
-                                    dest = std::net::IpAddr::V4(Ipv4Addr::from_octets(
-                                        attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
-                                    ));
-                                }
-                                _ => {
-                                    return Err(NetlinkError::InvalidAddressFamily);
-                                }
+        if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
+            && let Some(payload) = rtm.get_payload()
+        {
+            for attr in payload.rtattrs().iter() {
+                match attr.rta_type() {
+                    Rta::Oif => {
+                        // are attributes just buffers of bytes with a length equal
+                        // to the data size of the attribute?
+                        // who says its little endian
+                        thisifi = u32::from_le_bytes(
+                            attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
+                        );
+                    }
+                    Rta::Dst => {
+                        // dest is used to detect link local in the c code
+                        // dest is an address, we check the first bit of it to see if its a local prefix
+                        // we should add a dest variable that will keep track fo the dest we are sent
+                        // and it will get overriden by the last attribute. so we should do the check outside of the attribute loop
+                        match address_family {
+                            RtAddrFamily::Inet6 => {
+                                dest = std::net::IpAddr::V6(Ipv6Addr::from_octets(
+                                    attr.rta_payload().as_ref()[0..16].try_into().unwrap(),
+                                ));
+                            }
+                            RtAddrFamily::Inet => {
+                                dest = std::net::IpAddr::V4(Ipv4Addr::from_octets(
+                                    attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
+                                ));
+                            }
+                            _ => {
+                                return Err(NetlinkError::InvalidAddressFamily);
                             }
                         }
-                        Rta::Multipath => {
-                            // try to find if there is a solution here that doesn't need unsafe
-                            let rtnexthop =
-                                attr.rta_payload().as_ref() as *const _ as *const rtnexthop;
-                            thisifi = unsafe { (*rtnexthop).rtnh_ifindex as u32 }
-                        }
-                        _ => {
-                            // we don't care about that attribute
-                            continue;
-                        }
+                    }
+                    Rta::Multipath => {
+                        // try to find if there is a solution here that doesn't need unsafe
+                        let rtnexthop = attr.rta_payload().as_ref() as *const _ as *const rtnexthop;
+                        thisifi = unsafe { (*rtnexthop).rtnh_ifindex as u32 }
+                    }
+                    _ => {
+                        // we don't care about that attribute
+                        continue;
                     }
                 }
-                // we didn't get an oif attribute, or the one we got was the loopback
-                if thisifi == 0 || thisifi == 1 {
-                    continue;
-                }
+            }
+            // we didn't get an oif attribute, or the one we got was the loopback
+            if thisifi == 0 || thisifi == 1 {
+                continue;
+            }
 
-                match dest {
-                    IpAddr::V4(ip4) => {
-                        if ip4.is_link_local() {
-                            continue;
-                        }
-                    }
-                    IpAddr::V6(ip6) => {
-                        if ip6.is_unicast_link_local() {
-                            continue;
-                        }
+            match dest {
+                IpAddr::V4(ip4) => {
+                    if ip4.is_link_local() {
+                        continue;
                     }
                 }
+                IpAddr::V6(ip6) => {
+                    if ip6.is_unicast_link_local() {
+                        continue;
+                    }
+                }
+            }
 
-                if *payload.rtm_dst_len() == 0 {
-                    defifi = thisifi
-                } else {
-                    anyifi = thisifi
-                }
+            if *payload.rtm_dst_len() == 0 {
+                defifi = thisifi
+            } else {
+                anyifi = thisifi
             }
         }
     }
@@ -145,7 +144,7 @@ pub fn nl_get_exit_ifi(
     if anyifi != 0 {
         return Ok(anyifi);
     }
-    return Err(NetlinkError::NoIfaceWithDefaultRoute);
+    Err(NetlinkError::NoIfaceWithDefaultRoute)
 }
 
 // this function will return an enum that contains the address and the prefix
@@ -190,7 +189,7 @@ pub fn nl_get_addr(
         let res = res.unwrap();
         if let NlPayload::<_, Ifaddrmsg>::Payload(p) = res.nl_payload() {
             // todo: there was another condition related to a flag ?
-            if *p.ifa_index() as u32 != iface_idx {
+            if *p.ifa_index() != iface_idx {
                 continue;
             }
 
@@ -278,29 +277,29 @@ pub fn nl_get_default_gw(
 
     for res in recv {
         let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
-        if let NlTypeWrapper::Rtm(_) = rtm.nl_type() {
-            if let Some(payload) = rtm.get_payload() {
-                for attr in payload.rtattrs().iter() {
-                    match attr.rta_type() {
-                        Rta::Gateway => match address_family {
-                            RtAddrFamily::Inet => {
-                                return Ok(attr.rta_payload().as_ref()[0..4].try_into().unwrap());
-                            }
-                            RtAddrFamily::Inet6 => {
-                                return Ok(attr.rta_payload().as_ref()[0..16].try_into().unwrap());
-                            }
-                            _ => {
-                                return Err(NetlinkError::InvalidAddressFamily);
-                            }
-                        },
-                        _ => {
-                            // an attribute we don't care about
+        if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
+            && let Some(payload) = rtm.get_payload()
+        {
+            for attr in payload.rtattrs().iter() {
+                match attr.rta_type() {
+                    Rta::Gateway => match address_family {
+                        RtAddrFamily::Inet => {
+                            return Ok(attr.rta_payload().as_ref()[0..4].into());
                         }
+                        RtAddrFamily::Inet6 => {
+                            return Ok(attr.rta_payload().as_ref()[0..16].into());
+                        }
+                        _ => {
+                            return Err(NetlinkError::InvalidAddressFamily);
+                        }
+                    },
+                    _ => {
+                        // an attribute we don't care about
                     }
                 }
             }
         }
     }
 
-    return Err(NetlinkError::NoGatewayAttribute);
+    Err(NetlinkError::NoGatewayAttribute)
 }

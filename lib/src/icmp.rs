@@ -1,4 +1,3 @@
-use std::fmt;
 use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net;
