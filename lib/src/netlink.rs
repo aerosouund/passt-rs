@@ -53,7 +53,7 @@ pub fn nl_get_exit_ifi(
         .rtm_table(RtTable::Main)
         .rtm_protocol(Rtprot::Unspec)
         .rtm_scope(RtScope::Universe)
-        .rtm_type(Rtn::Unspec)
+        .rtm_type(Rtn::Unicast)
         .build()
         .unwrap();
 
