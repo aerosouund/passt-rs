@@ -41,10 +41,8 @@ pub enum NetlinkError {
 
 /// get the interface that has a route with the shortest possible prefix (as close as possible to zero)
 #[allow(unused_assignments)]
-pub fn nl_get_exit_ifi(
-    nl_sock: &NlRouter,
-    address_family: RtAddrFamily,
-) -> Result<u32, NetlinkError> {
+pub fn nl_get_exit_ifi(address_family: RtAddrFamily) -> Result<u32, NetlinkError> {
+    let (nl_sock, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
     let (mut thisifi, mut defifi, mut anyifi) = (0, 0, 0);
 
     let rtmsg = RtmsgBuilder::default()
@@ -158,7 +156,6 @@ pub fn nl_get_exit_ifi(
 // if i pass scopes then i will need to make multiple syscalls. its better to return 2 ipnets
 // one for link local and one not
 pub fn nl_get_addr(
-    _: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
 ) -> Result<Option<IpScopes>, NetlinkError> {
@@ -259,10 +256,12 @@ pub fn nl_get_addr(
 }
 
 pub fn nl_get_default_gw(
-    nl_sock: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
 ) -> Result<Vec<u8>, NetlinkError> {
+    // this was weird as hell. so basically we can't just build one socket and share it across pids
+    let (nl_sock, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
+
     let oif_attr = RtattrBuilder::default()
         .rta_type(Rta::Oif)
         .rta_payload(iface_idx)

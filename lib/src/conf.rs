@@ -25,7 +25,6 @@ pub enum InitConfError {
 }
 pub struct Conf {
     pub tap_fd: i32,
-    pub nl_socket: NlRouter,
     pub mode: Mode,
     pub ip4: Ipv4Conf,
     pub ip6: Ipv6Conf,
@@ -34,10 +33,9 @@ pub struct Conf {
 }
 
 impl Conf {
-    pub fn new(nl_sock: NlRouter) -> Self {
+    pub fn new() -> Self {
         Conf {
             tap_fd: 0,
-            nl_socket: nl_sock,
             mode: Mode::Passt,
             ip4: Ipv4Conf::default(),
             ip6: Ipv6Conf::default(),
@@ -47,13 +45,12 @@ impl Conf {
     }
 
     pub fn init() -> Result<Self, InitConfError> {
-        let (nl_socket, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
-        // let ip6conf = ipv6_conf(&nl_socket)?;
-        let ip4conf = ipv4_conf(&nl_socket)?;
+        let ip6conf = ipv6_conf()?;
+        let ip4conf = ipv4_conf()?;
 
-        let mut c = Conf::new(nl_socket);
+        let mut c = Conf::new();
 
-        // c.ip6 = ip6conf;
+        c.ip6 = ip6conf;
         c.ip4 = ip4conf;
         Ok(c)
     }
@@ -78,13 +75,11 @@ impl Default for Ipv4Conf {
 }
 
 // todo: should we make specific error types for ipv6 and ipv4 ?
-pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, InitConfError> {
-    let ifi = nl_get_exit_ifi(nl_socket, RtAddrFamily::Inet6)?;
+pub fn ipv6_conf() -> Result<Ipv6Conf, InitConfError> {
+    let ifi = nl_get_exit_ifi(RtAddrFamily::Inet6)?;
 
-    let gatewayv6 = nl_get_default_gw(nl_socket, ifi, RtAddrFamily::Inet6)?;
-    let ipscopes = nl_get_addr(nl_socket, ifi, RtAddrFamily::Inet6)?
-        .take()
-        .unwrap();
+    let gatewayv6 = nl_get_default_gw(ifi, RtAddrFamily::Inet6)?;
+    let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet6)?.take().unwrap();
 
     let mut conf = Ipv6Conf {
         guest_gw: Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap()),
@@ -102,13 +97,11 @@ pub fn ipv6_conf(nl_socket: &NlRouter) -> Result<Ipv6Conf, InitConfError> {
     Ok(conf)
 }
 
-pub fn ipv4_conf(nl_socket: &NlRouter) -> Result<Ipv4Conf, InitConfError> {
-    let ifi = nl_get_exit_ifi(nl_socket, RtAddrFamily::Inet)?;
+pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
+    let ifi = nl_get_exit_ifi(RtAddrFamily::Inet)?;
 
-    let gatewayv4 = nl_get_default_gw(nl_socket, ifi, RtAddrFamily::Inet)?;
-    let ipscopes = nl_get_addr(nl_socket, ifi, RtAddrFamily::Inet)?
-        .take()
-        .unwrap();
+    let gatewayv4 = nl_get_default_gw(ifi, RtAddrFamily::Inet)?;
+    let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet)?.take().unwrap();
 
     let mut conf = Ipv4Conf {
         guest_gw: Ipv4Addr::from_octets(gatewayv4.try_into().unwrap()),
