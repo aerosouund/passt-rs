@@ -4,9 +4,6 @@ use crate::netlink::NetlinkError;
 use clap::ValueEnum;
 use ipnet::IpNet;
 use neli::consts::rtnl::RtAddrFamily;
-use neli::consts::socket::NlFamily;
-use neli::router::synchronous::NlRouter;
-use neli::utils::Groups;
 use pnet::util::MacAddr;
 use thiserror::Error;
 
@@ -32,8 +29,8 @@ pub struct Conf {
     pub guest_mac: MacAddr,
 }
 
-impl Conf {
-    pub fn new() -> Self {
+impl Default for Conf {
+    fn default() -> Self {
         Conf {
             tap_fd: 0,
             mode: Mode::Passt,
@@ -43,15 +40,18 @@ impl Conf {
             guest_mac: MacAddr::default(),
         }
     }
+}
 
+impl Conf {
     pub fn init() -> Result<Self, InitConfError> {
         let ip6conf = ipv6_conf()?;
         let ip4conf = ipv4_conf()?;
 
-        let mut c = Conf::new();
-
-        c.ip6 = ip6conf;
-        c.ip4 = ip4conf;
+        let c = Conf {
+            ip6: ip6conf,
+            ip4: ip4conf,
+            ..Default::default()
+        };
         Ok(c)
     }
 }
