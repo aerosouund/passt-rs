@@ -283,9 +283,9 @@ pub fn nl_get_default_gw(
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
-            if *payload.rtm_dst_len() != 0 {
-                continue;
-            }
+            // if *payload.rtm_dst_len() != 0 {
+            //     continue;
+            // }
 
             for attr in payload.rtattrs().iter() {
                 eprintln!("got attribute of type {:?}", attr.rta_type());
