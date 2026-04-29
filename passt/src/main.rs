@@ -5,7 +5,7 @@ use clap::Parser;
 use libpasst::conf::Conf;
 use libpasst::muxer::{ConnEnum, StreamConnCtx};
 use libpasst::{handle_packets, handle_tap_ethernet};
-use log::error;
+use log::{error, info};
 use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
 
@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
     let mut c = Conf::init().unwrap(); // todo: parse from arguments
 
     let mut events = Events::with_capacity(16);
+    info!("starting event loop...");
     loop {
         poll.poll(&mut events, Some(Duration::from_secs(5)))?;
         for ev in events.iter() {

@@ -178,7 +178,6 @@ pub fn nl_get_addr(
         }
     };
 
-    // is ifaddrmessage the correct thing here ?
     let ifmsg = IfaddrmsgBuilder::default()
         .ifa_family(address_family)
         .ifa_prefixlen(0)
@@ -196,7 +195,6 @@ pub fn nl_get_addr(
             Ok(m) => m,
             Err(_) => continue, // skip Done and other terminators
         };
-        eprintln!("something");
         if let NlPayload::<_, Ifaddrmsg>::Payload(p) = msg.nl_payload() {
             // todo: there was another condition related to a flag ?
             if *p.ifa_index() != iface_idx {
@@ -297,11 +295,6 @@ pub fn nl_get_default_gw(
             }
 
             for attr in payload.rtattrs().iter() {
-                eprintln!(
-                    "{:?}, got attribute of type {:?}",
-                    address_family,
-                    attr.rta_type()
-                );
                 match attr.rta_type() {
                     Rta::Gateway => match address_family {
                         RtAddrFamily::Inet => {

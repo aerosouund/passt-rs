@@ -3,6 +3,7 @@
 use crate::netlink::NetlinkError;
 use clap::ValueEnum;
 use ipnet::IpNet;
+use log::info;
 use neli::consts::rtnl::RtAddrFamily;
 use pnet::util::MacAddr;
 use thiserror::Error;
@@ -94,6 +95,10 @@ pub fn ipv6_conf() -> Result<Ipv6Conf, InitConfError> {
     if let IpNet::V6(addrv6) = ipscopes.link_local_addr {
         conf.our_tap_ll = addrv6.addr();
     }
+    info!(
+        "initialized ipv6. gateway: {}, addr: {}",
+        conf.guest_gw, conf.addr
+    );
     Ok(conf)
 }
 
@@ -111,6 +116,10 @@ pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
         conf.addr = addrv4.addr();
     }
     // do we need link local setup for v4 ?
+    info!(
+        "initialized ipv6. gateway: {}, addr: {}",
+        conf.guest_gw, conf.addr
+    );
     Ok(conf)
 }
 
