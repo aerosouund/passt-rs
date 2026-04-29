@@ -37,6 +37,7 @@ pub enum NetlinkError {
     NoGatewayAttribute,
 }
 
+/// get the interface that has a route with the shortest possible prefix (as close as possible to zero)
 #[allow(unused_assignments)]
 pub fn nl_get_exit_ifi(
     nl_sock: &NlRouter,
@@ -290,17 +291,17 @@ pub fn nl_get_default_gw(
             for attr in payload.rtattrs().iter() {
                 eprintln!("got attribute of type {:?}", attr.rta_type());
                 match attr.rta_type() {
-                    Rta::Gateway => match address_family {
-                        RtAddrFamily::Inet => {
-                            return Ok(attr.rta_payload().as_ref()[0..4].into());
-                        }
-                        RtAddrFamily::Inet6 => {
-                            return Ok(attr.rta_payload().as_ref()[0..16].into());
-                        }
-                        _ => {
-                            return Err(NetlinkError::InvalidAddressFamily);
-                        }
-                    },
+                    // Rta::Gateway => match address_family {
+                    //     RtAddrFamily::Inet => {
+                    //         return Ok(attr.rta_payload().as_ref()[0..4].into());
+                    //     }
+                    //     RtAddrFamily::Inet6 => {
+                    //         return Ok(attr.rta_payload().as_ref()[0..16].into());
+                    //     }
+                    //     _ => {
+                    //         return Err(NetlinkError::InvalidAddressFamily);
+                    //     }
+                    // },
                     Rta::Multipath => {
                         // understanding neli is no longer a joke here. this shit feels like magic in a way i find annoying
                         let a = attr.get_attr_handle::<Rta>().unwrap();
