@@ -48,12 +48,12 @@ impl Conf {
 
     pub fn init() -> Result<Self, InitConfError> {
         let (nl_socket, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
-        let ip6conf = ipv6_conf(&nl_socket)?;
+        // let ip6conf = ipv6_conf(&nl_socket)?;
         let ip4conf = ipv4_conf(&nl_socket)?;
 
         let mut c = Conf::new(nl_socket);
 
-        c.ip6 = ip6conf;
+        // c.ip6 = ip6conf;
         c.ip4 = ip4conf;
         Ok(c)
     }
