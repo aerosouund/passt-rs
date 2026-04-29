@@ -276,7 +276,7 @@ pub fn nl_get_default_gw(
         .unwrap();
 
     let recv = nl_sock
-        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::REQUEST, NlPayload::Payload(rtmsg))
+        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::DUMP, NlPayload::Payload(rtmsg))
         .unwrap();
 
     for res in recv {
@@ -284,6 +284,9 @@ pub fn nl_get_default_gw(
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
+            // ammar: this conditional still applies though, dont see how we had to omit it
+            // the core of the problem is that the c code gets a gateway attribute but the
+            // rust does not
             // if *payload.rtm_dst_len() != 0 {
             //     continue;
             // }
@@ -310,6 +313,8 @@ pub fn nl_get_default_gw(
                         // understanding neli is no longer a joke here. this shit feels like magic in a way i find annoying
                         let a = attr.get_attr_handle::<Rta>().unwrap();
                         let inner = a.get_attrs();
+                        // ammar: finish this snippet to make it extract nested gateway attributes and
+                        // get their payloads appropriately
                         for inner_attr in inner {
                             if let Rta::Gateway = inner_attr.rta_type() {
                                 let _inner_payload = inner_attr.rta_payload();
