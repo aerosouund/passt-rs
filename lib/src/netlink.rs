@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use linux_raw_sys::netlink::rtnexthop;
+use linux_raw_sys::netlink::{rtattr, rtnexthop};
+use neli::attr::Attribute;
 use neli::consts::nl::{NlTypeWrapper, NlmF};
 use neli::consts::rtnl::{Ifa, RtAddrFamily, RtScope, RtTable, Rta, Rtm, Rtn, Rtprot};
 use neli::router::synchronous::NlRouter;
@@ -279,10 +280,14 @@ pub fn nl_get_default_gw(
         .unwrap();
 
     for res in recv {
-        let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
+        let rtm: &Nlmsghdr<NlTypeWrapper, Rtmsg> = res.as_ref().unwrap();
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
+            if *payload.rtm_dst_len() != 0 {
+                continue;
+            }
+
             for attr in payload.rtattrs().iter() {
                 match attr.rta_type() {
                     Rta::Gateway => match address_family {
@@ -296,6 +301,16 @@ pub fn nl_get_default_gw(
                             return Err(NetlinkError::InvalidAddressFamily);
                         }
                     },
+                    Rta::Multipath => {
+                        // understanding neli is no longer a joke here. this shit feels like magic in a way i find annoying
+                        let a = attr.get_attr_handle::<Rta>().unwrap();
+                        let inner = a.get_attrs();
+                        for inner_attr in inner {
+                            if let Rta::Gateway = inner_attr.rta_type() {
+                                let _inner_payload = inner_attr.rta_payload();
+                            }
+                        }
+                    }
                     _ => {
                         // an attribute we don't care about
                     }
