@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use linux_raw_sys::netlink::{rtattr, rtnexthop};
-use neli::attr::Attribute;
+use linux_raw_sys::netlink::rtnexthop;
 use neli::consts::nl::{NlTypeWrapper, NlmF};
 use neli::consts::rtnl::{Ifa, RtAddrFamily, RtScope, RtTable, Rta, Rtm, Rtn, Rtprot};
 use neli::router::synchronous::NlRouter;
