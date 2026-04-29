@@ -270,7 +270,7 @@ pub fn nl_get_default_gw(
         .rtm_table(RtTable::Main)
         .rtm_protocol(Rtprot::Unspec)
         .rtm_scope(RtScope::Universe)
-        .rtm_type(Rtn::Unspec)
+        .rtm_type(Rtn::Unicast)
         .rtattrs(attrs)
         .build()
         .unwrap();
@@ -291,17 +291,17 @@ pub fn nl_get_default_gw(
             for attr in payload.rtattrs().iter() {
                 eprintln!("got attribute of type {:?}", attr.rta_type());
                 match attr.rta_type() {
-                    // Rta::Gateway => match address_family {
-                    //     RtAddrFamily::Inet => {
-                    //         return Ok(attr.rta_payload().as_ref()[0..4].into());
-                    //     }
-                    //     RtAddrFamily::Inet6 => {
-                    //         return Ok(attr.rta_payload().as_ref()[0..16].into());
-                    //     }
-                    //     _ => {
-                    //         return Err(NetlinkError::InvalidAddressFamily);
-                    //     }
-                    // },
+                    Rta::Gateway => match address_family {
+                        RtAddrFamily::Inet => {
+                            return Ok(attr.rta_payload().as_ref()[0..4].into());
+                        }
+                        RtAddrFamily::Inet6 => {
+                            return Ok(attr.rta_payload().as_ref()[0..16].into());
+                        }
+                        _ => {
+                            return Err(NetlinkError::InvalidAddressFamily);
+                        }
+                    },
                     Rta::Multipath => {
                         // understanding neli is no longer a joke here. this shit feels like magic in a way i find annoying
                         let a = attr.get_attr_handle::<Rta>().unwrap();
