@@ -191,6 +191,7 @@ pub fn nl_get_addr(
 
     for res in recv {
         let res = res.unwrap();
+        eprintln!("something");
         if let NlPayload::<_, Ifaddrmsg>::Payload(p) = res.nl_payload() {
             // todo: there was another condition related to a flag ?
             if *p.ifa_index() != iface_idx {
