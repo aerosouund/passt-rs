@@ -4,9 +4,11 @@ use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use linux_raw_sys::netlink::rtnexthop;
 use neli::consts::nl::{NlTypeWrapper, NlmF};
 use neli::consts::rtnl::{Ifa, RtAddrFamily, RtScope, RtTable, Rta, Rtm, Rtn, Rtprot};
+use neli::consts::socket::NlFamily;
 use neli::router::synchronous::NlRouter;
 use neli::rtnl::{Ifaddrmsg, IfaddrmsgBuilder, RtattrBuilder, Rtmsg, RtmsgBuilder};
 use neli::types::RtBuffer;
+use neli::utils::Groups;
 use std::io::Read;
 use std::net::IpAddr;
 use thiserror::Error;
@@ -37,13 +39,12 @@ pub enum NetlinkError {
     NoGatewayAttribute,
 }
 
+/// get the interface that has a route with the shortest possible prefix (as close as possible to zero)
+/// we will send a message to dump all routes and we will go over them to get the interface index we want.
 #[allow(unused_assignments)]
-pub fn nl_get_exit_ifi(
-    nl_sock: &NlRouter,
-    address_family: RtAddrFamily,
-) -> Result<u32, NetlinkError> {
+pub fn nl_get_exit_ifi(address_family: RtAddrFamily) -> Result<u32, NetlinkError> {
+    let (nl_sock, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
     let (mut thisifi, mut defifi, mut anyifi) = (0, 0, 0);
-    let mut dest = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // placeholder
 
     let rtmsg = RtmsgBuilder::default()
         .rtm_family(address_family)
@@ -53,12 +54,12 @@ pub fn nl_get_exit_ifi(
         .rtm_table(RtTable::Main)
         .rtm_protocol(Rtprot::Unspec)
         .rtm_scope(RtScope::Universe)
-        .rtm_type(Rtn::Unspec)
+        .rtm_type(Rtn::Unicast)
         .build()
         .unwrap();
 
-    // how much buffer space are we allocating to receive these things ?
-    // this api is diabolical. i need to understand it properly
+    // ammar: how much buffer space are we allocating to receive these things ?
+    // ammar: this api is diabolical. i need to understand it properly
     let recv = nl_sock
         .send::<_, _, NlTypeWrapper, _>(
             Rtm::Getroute,
@@ -69,24 +70,27 @@ pub fn nl_get_exit_ifi(
 
     for res in recv {
         let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
+        let mut dest = IpAddr::V4(Ipv4Addr::UNSPECIFIED); // placeholder
+
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
+            // iterate over each route message attributes
             for attr in payload.rtattrs().iter() {
                 match attr.rta_type() {
+                    // if the attribute is an Oif (index of an interface), we will parse it
+                    // because eventually we wanna return an interface index
                     Rta::Oif => {
-                        // are attributes just buffers of bytes with a length equal
-                        // to the data size of the attribute?
-                        // who says its little endian
                         thisifi = u32::from_le_bytes(
                             attr.rta_payload().as_ref()[0..4].try_into().unwrap(),
                         );
                     }
+                    // a Dst attribute is basically the destination address of that route, we
+                    // are trying to search for the default, but we will return this is we didn't
+                    // find a default. for example:
+                    // 10.0.0.0/8 via 10.0.0.1 dev eth1, 10.0.0.0/8 is the Dst
                     Rta::Dst => {
-                        // dest is used to detect link local in the c code
-                        // dest is an address, we check the first bit of it to see if its a local prefix
-                        // we should add a dest variable that will keep track fo the dest we are sent
-                        // and it will get overriden by the last attribute. so we should do the check outside of the attribute loop
+                        // todo: shortest prefix matching is still missing here
                         match address_family {
                             RtAddrFamily::Inet6 => {
                                 dest = std::net::IpAddr::V6(Ipv6Addr::from_octets(
@@ -103,8 +107,12 @@ pub fn nl_get_exit_ifi(
                             }
                         }
                     }
+                    // a Multipath attribute is when there are multiple interfaces for one route
+                    // and the kernel is supposed to load balance between them. for example:
+                    // default via 192.168.1.1 dev eth0 weight 1
+                    //         via 192.168.1.2 dev eth1 weight 1
                     Rta::Multipath => {
-                        // try to find if there is a solution here that doesn't need unsafe
+                        // todo: try to find if there is a solution here that doesn't need unsafe
                         let rtnexthop = attr.rta_payload().as_ref() as *const _ as *const rtnexthop;
                         thisifi = unsafe { (*rtnexthop).rtnh_ifindex as u32 }
                     }
@@ -132,6 +140,8 @@ pub fn nl_get_exit_ifi(
                 }
             }
 
+            // if the dest_len is zero, then immediately thats the default gateway route
+            // we want to get the index of the interface of that route
             if *payload.rtm_dst_len() == 0 {
                 defifi = thisifi
             } else {
@@ -149,15 +159,14 @@ pub fn nl_get_exit_ifi(
     Err(NetlinkError::NoIfaceWithDefaultRoute)
 }
 
-// this function will return an enum that contains the address and the prefix
-// what about the link local case ? does it differ for the ipv6 case ?
-// if i pass scopes then i will need to make multiple syscalls. its better to return 2 ipnets
-// one for link local and one not
+// given an interface index, get all the addresses configured on it and return the one with the
+// highest prefix (a /32).
 pub fn nl_get_addr(
-    nl_sock: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
 ) -> Result<Option<IpScopes>, NetlinkError> {
+    let (nl_sock, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
+
     let mut max_prefix = 0;
     let mut ipscopes = {
         match address_family {
@@ -188,8 +197,8 @@ pub fn nl_get_addr(
         .unwrap();
 
     for res in recv {
-        let res = res.unwrap();
-        if let NlPayload::<_, Ifaddrmsg>::Payload(p) = res.nl_payload() {
+        let msg = res.unwrap();
+        if let NlPayload::<_, Ifaddrmsg>::Payload(p) = msg.nl_payload() {
             // todo: there was another condition related to a flag ?
             if *p.ifa_index() != iface_idx {
                 continue;
@@ -247,11 +256,13 @@ pub fn nl_get_addr(
     Ok(Some(ipscopes))
 }
 
+// given an interface index, get the address with the shortest prefix (default)
 pub fn nl_get_default_gw(
-    nl_sock: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
 ) -> Result<Vec<u8>, NetlinkError> {
+    let (nl_sock, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
+
     let oif_attr = RtattrBuilder::default()
         .rta_type(Rta::Oif)
         .rta_payload(iface_idx)
@@ -268,22 +279,31 @@ pub fn nl_get_default_gw(
         .rtm_table(RtTable::Main)
         .rtm_protocol(Rtprot::Unspec)
         .rtm_scope(RtScope::Universe)
-        .rtm_type(Rtn::Unspec)
+        .rtm_type(Rtn::Unicast)
         .rtattrs(attrs)
         .build()
         .unwrap();
 
     let recv = nl_sock
-        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::REQUEST, NlPayload::Payload(rtmsg))
+        .send::<_, _, NlTypeWrapper, _>(Rtm::Getroute, NlmF::DUMP, NlPayload::Payload(rtmsg))
         .unwrap();
 
     for res in recv {
-        let rtm: Nlmsghdr<NlTypeWrapper, Rtmsg> = res.unwrap();
+        let rtm: &Nlmsghdr<NlTypeWrapper, Rtmsg> = res.as_ref().unwrap();
         if let NlTypeWrapper::Rtm(_) = rtm.nl_type()
             && let Some(payload) = rtm.get_payload()
         {
+            // if this route has a non_zero dest_len, it's immediately not the default
+            if *payload.rtm_dst_len() != 0 {
+                continue;
+            }
+
             for attr in payload.rtattrs().iter() {
                 match attr.rta_type() {
+                    // the gateway attribute is the next hop for some route
+                    // since we already excluded the routes that don't have a zero dest len
+                    // so if we are here then this means this is a default via x.x.x.x route
+                    // the x's bit is the gateway and is what we are interested in
                     Rta::Gateway => match address_family {
                         RtAddrFamily::Inet => {
                             return Ok(attr.rta_payload().as_ref()[0..4].into());
@@ -295,6 +315,18 @@ pub fn nl_get_default_gw(
                             return Err(NetlinkError::InvalidAddressFamily);
                         }
                     },
+                    Rta::Multipath => {
+                        // understanding neli is no longer a joke here. this shit feels like magic in a way i find annoying
+                        let a = attr.get_attr_handle::<Rta>().unwrap();
+                        let inner = a.get_attrs();
+                        // ammar: finish this snippet to make it extract nested gateway attributes and
+                        // get their payloads appropriately
+                        for inner_attr in inner {
+                            if let Rta::Gateway = inner_attr.rta_type() {
+                                let _inner_payload = inner_attr.rta_payload();
+                            }
+                        }
+                    }
                     _ => {
                         // an attribute we don't care about
                     }

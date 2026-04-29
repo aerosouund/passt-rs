@@ -5,7 +5,7 @@ use clap::Parser;
 use libpasst::conf::Conf;
 use libpasst::muxer::{ConnEnum, StreamConnCtx};
 use libpasst::{handle_packets, handle_tap_ethernet};
-use log::error;
+use log::{error, info};
 use mio::net::UnixListener;
 use mio::{Events, Interest, Poll, Token};
 
@@ -17,16 +17,16 @@ use std::time::Duration;
 mod conf;
 
 fn main() -> anyhow::Result<()> {
+    env_logger::init();
     unsafe {
         setup_sig_handler(exit_handler as *const () as usize, libc::SIGTERM);
         setup_sig_handler(exit_handler as *const () as usize, libc::SIGQUIT);
     }
+
     let args = Args::parse();
     let socket_path = args.socket_path.as_str();
     let _ = std::fs::remove_file(socket_path);
-
     let mut listener = UnixListener::bind(socket_path)?;
-
     let mut conn_map: HashMap<Token, ConnEnum> = HashMap::new();
 
     let mut poll = Poll::new()?;
@@ -34,10 +34,9 @@ fn main() -> anyhow::Result<()> {
         .register(&mut listener, Token(0), Interest::READABLE)?;
 
     conn_map.insert(Token(0), ConnEnum::SocketListener(listener));
-
     let mut c = Conf::init().unwrap(); // todo: parse from arguments
-
     let mut events = Events::with_capacity(16);
+    info!("starting event loop...");
     loop {
         poll.poll(&mut events, Some(Duration::from_secs(5)))?;
         for ev in events.iter() {
