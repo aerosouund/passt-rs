@@ -4,9 +4,11 @@ use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use linux_raw_sys::netlink::rtnexthop;
 use neli::consts::nl::{NlTypeWrapper, NlmF};
 use neli::consts::rtnl::{Ifa, RtAddrFamily, RtScope, RtTable, Rta, Rtm, Rtn, Rtprot};
+use neli::consts::socket::NlFamily;
 use neli::router::synchronous::NlRouter;
 use neli::rtnl::{Ifaddrmsg, IfaddrmsgBuilder, RtattrBuilder, Rtmsg, RtmsgBuilder};
 use neli::types::RtBuffer;
+use neli::utils::Groups;
 use std::io::Read;
 use std::net::IpAddr;
 use thiserror::Error;
@@ -156,10 +158,12 @@ pub fn nl_get_exit_ifi(
 // if i pass scopes then i will need to make multiple syscalls. its better to return 2 ipnets
 // one for link local and one not
 pub fn nl_get_addr(
-    nl_sock: &NlRouter,
+    _: &NlRouter,
     iface_idx: u32,
     address_family: RtAddrFamily,
 ) -> Result<Option<IpScopes>, NetlinkError> {
+    let (nl_sock, _) = NlRouter::connect(NlFamily::Route, None, Groups::empty()).unwrap();
+
     let mut max_prefix = 0;
     let mut ipscopes = {
         match address_family {
