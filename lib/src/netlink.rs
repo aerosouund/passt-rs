@@ -287,9 +287,9 @@ pub fn nl_get_default_gw(
             // ammar: this conditional still applies though, dont see how we had to omit it
             // the core of the problem is that the c code gets a gateway attribute but the
             // rust does not
-            // if *payload.rtm_dst_len() != 0 {
-            //     continue;
-            // }
+            if *payload.rtm_dst_len() != 0 {
+                continue;
+            }
 
             for attr in payload.rtattrs().iter() {
                 eprintln!(
