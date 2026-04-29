@@ -289,7 +289,11 @@ pub fn nl_get_default_gw(
             // }
 
             for attr in payload.rtattrs().iter() {
-                eprintln!("got attribute of type {:?}", attr.rta_type());
+                eprintln!(
+                    "{:?}, got attribute of type {:?}",
+                    address_family,
+                    attr.rta_type()
+                );
                 match attr.rta_type() {
                     Rta::Gateway => match address_family {
                         RtAddrFamily::Inet => {
