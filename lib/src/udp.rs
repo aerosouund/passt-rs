@@ -68,6 +68,9 @@ pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), Dhc
     // copy the options outside then set them back to the message at the end (zero copy my ass i guess)
     let mut opts = dhcp_msg.opts_mut().clone();
     // i wish i can get rid of this clone while reading the message type. i don't need to hold a reference to opts
+    if true {
+        return Ok(());
+    }
     let msgtype = opts
         .get(dhcproto::v4::OptionCode::MessageType)
         .unwrap()
