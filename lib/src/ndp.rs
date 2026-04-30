@@ -2,14 +2,14 @@
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use std::net::Ipv6Addr;
 
+use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
-use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
+use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
-use pnet::packet::{MutablePacket, Packet};
 
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
