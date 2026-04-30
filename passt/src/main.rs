@@ -49,7 +49,8 @@ fn main() -> anyhow::Result<()> {
                 ConnEnum::SocketListener(ref mut listener_stream) => {
                     let (mut stream, _) = listener_stream.accept().unwrap();
                     let stream_fd = stream.as_raw_fd() as usize;
-                    if c.tap_fd != 0 {
+                    // i will set it only if its not previously set ? dumb lol
+                    if c.tap_fd == 0 {
                         c.tap_fd = stream.as_raw_fd();
                     };
                     poll.registry()
