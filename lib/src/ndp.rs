@@ -2,13 +2,14 @@
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use std::net::Ipv6Addr;
 
-use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
+use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
+use pnet::packet::{MutablePacket, Packet};
 
 use crate::conf::Conf;
 use crate::icmp::IcmpError;
@@ -46,9 +47,8 @@ pub(crate) fn neighbour_advert(
 }
 
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
-    // are we building this opt correctly or there's a struct we can build then turn to a vector
-    // lets searchif there is one
     let mut prefix_opt_data = Vec::with_capacity(32);
+    // ammar: verify if we need this
     let mut addr_bytes = conf.ip6.addr.octets();
     addr_bytes[8..].fill(0);
 
@@ -82,6 +82,8 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     let mut v6_packet_vec =
         vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
+    // first, we build an ipv6 view on the router advertisement packet to set source, destination
+    // and other common ipv6 information
     let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
     v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
     v6reply.set_payload_length(router_adv.packet().len() as u16);
@@ -89,5 +91,17 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
 
-    send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
+    // we need to then build an icmpv6 view so we can compute and set the checksum
+    let mut crazy_icmp = MutableIcmpv6Packet::new(v6reply.packet_mut()).unwrap();
+
+    let cs = pnet::util::ipv6_checksum(
+        crazy_icmp.packet(),
+        1,
+        &[],
+        &conf.ip6.our_tap_ll,
+        &dest,
+        IpNextHeaderProtocols::Icmpv6,
+    );
+    crazy_icmp.set_checksum(cs);
+    send_ether(conf, EtherTypes::Ipv6, crazy_icmp.packet()).map_err(IcmpError::Tap)
 }
