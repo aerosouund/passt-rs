@@ -46,13 +46,18 @@ pub(crate) fn neighbour_advert(
 }
 
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
+    // are we building this opt correctly or there's a struct we can build then turn to a vector
+    // lets searchif there is one
     let mut prefix_opt_data = Vec::with_capacity(32);
+    let mut addr_bytes = conf.ip6.addr.octets();
+    addr_bytes[8..].fill(0);
+
     prefix_opt_data.push(64);
     prefix_opt_data.push(0xC0);
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&0u32.to_be_bytes());
-    prefix_opt_data.extend_from_slice(&conf.ip6.addr.octets());
+    prefix_opt_data.extend_from_slice(&addr_bytes);
 
     // build the options vector
     let options = [
