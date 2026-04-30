@@ -3,10 +3,10 @@
 use std::net::Ipv6Addr;
 
 use pnet::packet::ethernet::EtherTypes;
-use pnet::packet::icmpv6::MutableIcmpv6Packet;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
+use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 use pnet::packet::{MutablePacket, Packet};
@@ -75,6 +75,8 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     let mut router_adv = MutableRouterAdvertPacket::new(&mut buf).unwrap();
     router_adv.set_hop_limit(255);
     router_adv.set_options(&options);
+    router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
+    router_adv.set_icmpv6_code(Icmpv6Code(0));
 
     let mut v6_packet_vec =
         vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
@@ -87,18 +89,21 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     v6reply.set_payload(router_adv.packet());
     v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
+    v6reply.set_version(6);
+    v6reply.set_hop_limit(255);
 
     // we need to then build an icmpv6 view so we can compute and set the checksum
     let mut crazy_icmp = MutableIcmpv6Packet::new(v6reply.packet_mut()).unwrap();
 
     let cs = pnet::util::ipv6_checksum(
-        crazy_icmp.packet(),
+        router_adv.packet(),
         0,
         &[],
         &conf.ip6.our_tap_ll,
         &dest,
         IpNextHeaderProtocols::Icmpv6,
     );
+
     crazy_icmp.set_checksum(cs);
     send_ether(conf, EtherTypes::Ipv6, crazy_icmp.packet()).map_err(IcmpError::Tap)
 }
