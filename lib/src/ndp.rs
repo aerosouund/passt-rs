@@ -92,7 +92,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     v6reply.set_version(6);
     v6reply.set_hop_limit(255);
 
-    let cs = pnet::util::ipv6_checksum(
+    let _cs = pnet::util::ipv6_checksum(
         router_adv.packet(),
         0,
         &[],
@@ -100,7 +100,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
         &dest,
         IpNextHeaderProtocols::Icmpv6,
     );
-    router_adv.set_checksum(cs);
+    router_adv.set_checksum(41099);
     v6reply.set_payload(router_adv.packet());
 
     send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
