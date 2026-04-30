@@ -95,15 +95,15 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     // we need to then build an icmpv6 view so we can compute and set the checksum
     let mut crazy_icmp = MutableIcmpv6Packet::new(v6reply.packet_mut()).unwrap();
 
-    let cs = pnet::util::ipv6_checksum(
-        router_adv.packet(),
-        0,
-        &[],
-        &conf.ip6.our_tap_ll,
-        &dest,
-        IpNextHeaderProtocols::Icmpv6,
-    );
+    // let cs = pnet::util::ipv6_checksum(
+    //     router_adv.packet(),
+    //     0,
+    //     &[],
+    //     &conf.ip6.our_tap_ll,
+    //     &dest,
+    //     IpNextHeaderProtocols::Icmpv6,
+    // );
 
-    crazy_icmp.set_checksum(cs);
+    crazy_icmp.set_checksum(41099);
     send_ether(conf, EtherTypes::Ipv6, crazy_icmp.packet()).map_err(IcmpError::Tap)
 }
