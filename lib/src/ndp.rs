@@ -3,10 +3,10 @@
 use std::net::Ipv6Addr;
 
 use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::icmpv6::MutableIcmpv6Packet;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
-use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 use pnet::packet::{MutablePacket, Packet};
@@ -48,16 +48,13 @@ pub(crate) fn neighbour_advert(
 
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
     let mut prefix_opt_data = Vec::with_capacity(32);
-    // ammar: verify if we need this
-    let mut addr_bytes = conf.ip6.addr.octets();
-    addr_bytes[8..].fill(0);
 
     prefix_opt_data.push(64);
     prefix_opt_data.push(0xC0);
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
     prefix_opt_data.extend_from_slice(&0u32.to_be_bytes());
-    prefix_opt_data.extend_from_slice(&addr_bytes);
+    prefix_opt_data.extend_from_slice(&conf.ip6.addr.octets());
 
     // build the options vector
     let options = [
@@ -96,7 +93,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
 
     let cs = pnet::util::ipv6_checksum(
         crazy_icmp.packet(),
-        1,
+        0,
         &[],
         &conf.ip6.our_tap_ll,
         &dest,
