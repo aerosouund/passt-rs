@@ -79,6 +79,8 @@ fn main() -> anyhow::Result<()> {
                 }
                 _ => {}
             }
+            // put back the connection in the map to avoid dropping it at the end of the loop iteration
+            conn_map.insert(ev.token(), conn);
         }
     }
 }
