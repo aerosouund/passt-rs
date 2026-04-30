@@ -117,7 +117,7 @@ pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
     }
     // do we need link local setup for v4 ?
     info!(
-        "initialized ipv6. gateway: {}, addr: {}",
+        "initialized ipv4. gateway: {}, addr: {}",
         conf.guest_gw, conf.addr
     );
     Ok(conf)
