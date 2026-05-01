@@ -76,15 +76,17 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     // ammar: should these be set on the router adv or the icmp packet. nah the router adv packet
     router_adv.set_hop_limit(255);
     router_adv.set_options(&options);
-    router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
     router_adv.set_icmpv6_code(Icmpv6Code(0));
 
     let mut icmp_pkt_vec =
         vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
     let mut icmp6_pkt = MutableIcmpv6Packet::new(&mut icmp_pkt_vec).unwrap();
+
+    icmp6_pkt.set_icmpv6_type(Icmpv6Types::RouterAdvert);
     icmp6_pkt.set_payload(router_adv.packet());
     icmp6_pkt.set_checksum(0);
+
     let cs = pnet::util::ipv6_checksum(
         icmp6_pkt.packet(),
         1,

@@ -44,7 +44,7 @@ pub enum IcmpError {
 }
 
 pub fn handle_icmp6_packet(conf: &Conf, v6packet: Ipv6Packet<'static>) -> Result<(), IcmpError> {
-    let dest = v6packet.get_destination();
+    let dest = v6packet.get_source();
 
     // todo: handle this unwrap
     let icmp_packet = Icmpv6Packet::owned(v6packet.payload().to_owned()).unwrap();
