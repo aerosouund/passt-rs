@@ -7,7 +7,7 @@ use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
 use dhcproto::{Decodable, Encodable, Encoder};
 use ipnet::Ipv4Net;
 use pnet::packet::ethernet::EtherTypes;
-use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::udp::UdpPacket;
 use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
 use std::net::Ipv4Addr;
 use thiserror::Error;
@@ -57,8 +57,8 @@ pub fn tap_udp4_sent(
     send_ether(conf, EtherTypes::Ipv4, ip_packet.payload()).map_err(UdpError::Tap)
 }
 
-pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), DhcpError> {
-    let mut dhcp_msg = match Message::decode(&mut Decoder::new(v4packet.payload())) {
+pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
+    let mut dhcp_msg = match Message::decode(&mut Decoder::new(udp_pkt.payload())) {
         Ok(msg) => msg,
         Err(_) => {
             return Err(DhcpError::InvalidPacket);
