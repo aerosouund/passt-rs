@@ -4,6 +4,7 @@ use std::net::Ipv6Addr;
 
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::icmpv6::Icmpv6Types;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
@@ -46,6 +47,7 @@ pub(crate) fn neighbour_advert(
 }
 
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
+    // build the prefix option
     let mut prefix_opt_data = Vec::with_capacity(32);
     prefix_opt_data.push(64);
     prefix_opt_data.push(0xC0);
@@ -73,16 +75,30 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     let mut router_adv = MutableRouterAdvertPacket::new(&mut buf).unwrap();
     router_adv.set_hop_limit(255);
     router_adv.set_options(&options);
+    router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
 
+    let cs = pnet::util::ipv6_checksum(
+        router_adv.packet(),
+        1,
+        &[],
+        &conf.ip6.our_tap_ll,
+        &dest,
+        IpNextHeaderProtocols::Icmpv6,
+    );
+    router_adv.set_checksum(cs);
+
+    // build the ipv6 wrapper around the router advert packet
     let mut v6_packet_vec =
         vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
     let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
     v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
     v6reply.set_payload_length(router_adv.packet().len() as u16);
-    v6reply.set_payload(router_adv.packet());
     v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
+    v6reply.set_version(6);
+    v6reply.set_hop_limit(255);
+    v6reply.set_payload(router_adv.packet());
 
     send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }
