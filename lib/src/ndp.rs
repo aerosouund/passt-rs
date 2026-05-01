@@ -56,6 +56,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     prefix_opt_data.extend_from_slice(&0u32.to_be_bytes());
     prefix_opt_data.extend_from_slice(&conf.ip6.addr.octets());
 
+    // todo: also add dns options
     // build the options vector
     let options = [
         NdpOption {
