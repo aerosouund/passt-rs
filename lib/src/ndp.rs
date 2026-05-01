@@ -75,7 +75,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     let mut router_adv = MutableRouterAdvertPacket::new(&mut buf).unwrap();
     router_adv.set_hop_limit(255);
     router_adv.set_options(&options);
-    // router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
+    router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
 
     let cs = pnet::util::ipv6_checksum(
         router_adv.packet(),
