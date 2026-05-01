@@ -4,10 +4,10 @@ use std::net::Ipv6Addr;
 
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::icmpv6::Icmpv6Code;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
-use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 
@@ -78,36 +78,36 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     router_adv.set_options(&options);
     router_adv.set_icmpv6_code(Icmpv6Code(0));
 
-    let mut icmp_pkt_vec =
-        vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + router_adv.packet().len()];
+    // // let mut icmp_pkt_vec =
+    // //     vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
-    let mut icmp6_pkt = MutableIcmpv6Packet::new(&mut icmp_pkt_vec).unwrap();
+    // // let mut icmp6_pkt = MutableIcmpv6Packet::new(&mut icmp_pkt_vec).unwrap();
 
-    icmp6_pkt.set_icmpv6_type(Icmpv6Types::RouterAdvert);
-    icmp6_pkt.set_payload(router_adv.packet());
-    icmp6_pkt.set_checksum(0);
+    // icmp6_pkt.set_icmpv6_type(Icmpv6Types::RouterAdvert);
+    // icmp6_pkt.set_payload(router_adv.packet());
+    router_adv.set_checksum(0);
 
     let cs = pnet::util::ipv6_checksum(
-        icmp6_pkt.packet(),
+        router_adv.packet(),
         1,
         &[],
         &conf.ip6.our_tap_ll,
         &dest,
         IpNextHeaderProtocols::Icmpv6,
     );
-    icmp6_pkt.set_checksum(cs);
+    router_adv.set_checksum(cs);
 
     let mut v6_packet_vec =
-        vec![0u8; MutableIpv6Packet::minimum_packet_size() + icmp6_pkt.packet().len()];
+        vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
     let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
     v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
-    v6reply.set_payload_length(icmp6_pkt.packet().len() as u16);
+    v6reply.set_payload_length(router_adv.packet().len() as u16);
     v6reply.set_source(conf.ip6.our_tap_ll);
     v6reply.set_destination(dest);
     v6reply.set_version(6);
     v6reply.set_hop_limit(255);
-    v6reply.set_payload(icmp6_pkt.packet());
+    v6reply.set_payload(router_adv.packet());
 
     send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }
