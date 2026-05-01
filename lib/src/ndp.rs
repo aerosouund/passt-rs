@@ -47,8 +47,8 @@ pub(crate) fn neighbour_advert(
 }
 
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
+    // build the prefix option
     let mut prefix_opt_data = Vec::with_capacity(32);
-
     prefix_opt_data.push(64);
     prefix_opt_data.push(0xC0);
     prefix_opt_data.extend_from_slice(&u32::MAX.to_be_bytes());
@@ -73,16 +73,9 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     // prefix opt (32) and the source link local opt (8). we need to verify them though
     let mut buf = vec![0u8; MutableRouterAdvertPacket::minimum_packet_size() + 32 + 8];
     let mut router_adv = MutableRouterAdvertPacket::new(&mut buf).unwrap();
-    // ammar: should these be set on the router adv or the icmp packet. nah the router adv packet
     router_adv.set_hop_limit(255);
     router_adv.set_options(&options);
     router_adv.set_icmpv6_code(Icmpv6Code(0));
-
-    // // let mut icmp_pkt_vec =
-    // //     vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + router_adv.packet().len()];
-
-    // // let mut icmp6_pkt = MutableIcmpv6Packet::new(&mut icmp_pkt_vec).unwrap();
-
     router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
     router_adv.set_checksum(0);
 
@@ -96,6 +89,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     );
     router_adv.set_checksum(cs);
 
+    // build the ipv6 wrapper around the router advert packet
     let mut v6_packet_vec =
         vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
