@@ -94,12 +94,13 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
 
     let cs = pnet::util::ipv6_checksum(
         router_adv.packet(),
-        0,
+        1,
         &[],
         &conf.ip6.our_tap_ll,
         &dest,
         IpNextHeaderProtocols::Icmpv6,
     );
+
     router_adv.set_checksum(cs);
     v6reply.set_payload(router_adv.packet());
 
