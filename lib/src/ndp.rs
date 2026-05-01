@@ -7,7 +7,7 @@ use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
-use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types};
+use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types, MutableIcmpv6Packet};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 
@@ -73,36 +73,39 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     // prefix opt (32) and the source link local opt (8). we need to verify them though
     let mut buf = vec![0u8; MutableRouterAdvertPacket::minimum_packet_size() + 32 + 8];
     let mut router_adv = MutableRouterAdvertPacket::new(&mut buf).unwrap();
+    // ammar: should these be set on the router adv or the icmp packet. nah the router adv packet
     router_adv.set_hop_limit(255);
     router_adv.set_options(&options);
     router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
     router_adv.set_icmpv6_code(Icmpv6Code(0));
-    router_adv.set_checksum(0);
 
-    let mut v6_packet_vec =
-        vec![0u8; MutableIpv6Packet::minimum_packet_size() + router_adv.packet().len()];
+    let mut icmp_pkt_vec =
+        vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + router_adv.packet().len()];
 
-    // first, we build an ipv6 view on the router advertisement packet to set source, destination
-    // and other common ipv6 information
-    let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
-    v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
-    v6reply.set_payload_length(router_adv.packet().len() as u16);
-    v6reply.set_source(conf.ip6.our_tap_ll);
-    v6reply.set_destination(dest);
-    v6reply.set_version(6);
-    v6reply.set_hop_limit(255);
-
+    let mut icmp6_pkt = MutableIcmpv6Packet::new(&mut icmp_pkt_vec).unwrap();
+    icmp6_pkt.set_payload(router_adv.packet());
+    icmp6_pkt.set_checksum(0);
     let cs = pnet::util::ipv6_checksum(
-        router_adv.packet(),
+        icmp6_pkt.packet(),
         1,
         &[],
         &conf.ip6.our_tap_ll,
         &dest,
         IpNextHeaderProtocols::Icmpv6,
     );
+    icmp6_pkt.set_checksum(cs);
 
-    router_adv.set_checksum(cs);
-    v6reply.set_payload(router_adv.packet());
+    let mut v6_packet_vec =
+        vec![0u8; MutableIpv6Packet::minimum_packet_size() + icmp6_pkt.packet().len()];
+
+    let mut v6reply = MutableIpv6Packet::new(&mut v6_packet_vec).unwrap();
+    v6reply.set_next_header(IpNextHeaderProtocols::Icmpv6);
+    v6reply.set_payload_length(icmp6_pkt.packet().len() as u16);
+    v6reply.set_source(conf.ip6.our_tap_ll);
+    v6reply.set_destination(dest);
+    v6reply.set_version(6);
+    v6reply.set_hop_limit(255);
+    v6reply.set_payload(icmp6_pkt.packet());
 
     send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }
