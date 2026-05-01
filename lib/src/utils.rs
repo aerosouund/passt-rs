@@ -25,7 +25,7 @@ pub(crate) fn send_ether(
 
     let len_buf = (ether_pkt.packet().len() as u32).to_be_bytes();
     let p = ether_pkt.consume_to_immutable();
-    let iovs = [IoSlice::new(p.packet()), IoSlice::new(&len_buf)];
+    let iovs = [IoSlice::new(&len_buf), IoSlice::new(p.packet())];
     send_single(conf, &iovs)?;
 
     Ok(())
