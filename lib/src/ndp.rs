@@ -4,10 +4,10 @@ use std::net::Ipv6Addr;
 
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
-use pnet::packet::icmpv6::Icmpv6Code;
 use pnet::packet::icmpv6::ndp::{
     MutableNeighborAdvertPacket, MutableRouterAdvertPacket, NdpOption, NdpOptionTypes,
 };
+use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Types};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::MutableIpv6Packet;
 
@@ -83,8 +83,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
 
     // // let mut icmp6_pkt = MutableIcmpv6Packet::new(&mut icmp_pkt_vec).unwrap();
 
-    // icmp6_pkt.set_icmpv6_type(Icmpv6Types::RouterAdvert);
-    // icmp6_pkt.set_payload(router_adv.packet());
+    router_adv.set_icmpv6_type(Icmpv6Types::RouterAdvert);
     router_adv.set_checksum(0);
 
     let cs = pnet::util::ipv6_checksum(
