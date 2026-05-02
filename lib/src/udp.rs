@@ -7,6 +7,7 @@ use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
 use dhcproto::{Decodable, Encodable, Encoder};
 use ipnet::Ipv4Net;
 use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
 use std::net::Ipv4Addr;
@@ -65,6 +66,7 @@ pub fn tap_udp4_sent(
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
     ip_packet.set_total_length(v4_len as u16);
+    ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
     ip_packet.set_payload(udp_packet.packet());
 
     send_ether(conf, EtherTypes::Ipv4, ip_packet.payload()).map_err(UdpError::Tap)
