@@ -117,6 +117,8 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
     opts.insert(DhcpOption::AddressLeaseTime(u32::MAX));
     opts.remove(OptionCode::ParameterRequestList);
     opts.remove(OptionCode::ClientIdentifier);
+    opts.remove(OptionCode::Hostname);
+    opts.remove(OptionCode::MaxMessageSize);
 
     let mask = ((!0u64 << (32 - conf.ip4.prefix_len as u32)) as u32).to_be();
     if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
