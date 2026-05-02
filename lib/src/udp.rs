@@ -102,6 +102,8 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
         };
         opts.insert(DhcpOption::MessageType(response_type));
     };
+
+    dhcp_msg.set_opcode(dhcproto::v4::Opcode::BootReply);
     // let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
     // shift an all ones 64 by 32 bytes - 0
     let mask = ((!0u64 << (32 - conf.ip4.prefix_len as u32)) as u32).to_be();
