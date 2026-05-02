@@ -66,6 +66,7 @@ pub fn tap_udp4_sent(
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
     ip_packet.set_total_length(v4_len as u16);
+    ip_packet.set_version(4);
     ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
     ip_packet.set_payload(udp_packet.packet());
 
