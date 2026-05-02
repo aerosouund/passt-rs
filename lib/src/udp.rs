@@ -70,6 +70,9 @@ pub fn tap_udp4_sent(
     ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
     ip_packet.set_header_length(5);
     ip_packet.set_ttl(255);
+    ip_packet.set_checksum(0); // zero first
+    let checksum = pnet::packet::ipv4::checksum(&ip_packet.to_immutable());
+    ip_packet.set_checksum(checksum);
     ip_packet.set_payload(udp_packet.packet());
 
     send_ether(conf, EtherTypes::Ipv4, ip_packet.packet()).map_err(UdpError::Tap)
