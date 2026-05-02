@@ -114,7 +114,7 @@ fn tap_handle_v6(
 ) -> Result<(), HandlePacketError> {
     match v6packet.get_next_header() {
         IpNextHeaderProtocols::Icmpv6 => {
-            // handle_icmp6_packet(conf, v6packet)?;
+            handle_icmp6_packet(conf, v6packet)?;
         }
         // this is here to disable the lint
         IpNextHeaderProtocols::Ax25 => {}

@@ -7,9 +7,9 @@ use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
 use dhcproto::{Decodable, Encodable, Encoder};
 use ipnet::Ipv4Net;
 use pnet::packet::ethernet::EtherTypes;
-use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
+use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::udp::UdpPacket;
-use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
+use pnet::packet::{Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
 use std::net::Ipv4Addr;
 use thiserror::Error;
 

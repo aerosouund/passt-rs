@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use std::net::Ipv6Addr;
 
-use anyhow::Ok;
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::icmpv6::Icmpv6Types;
