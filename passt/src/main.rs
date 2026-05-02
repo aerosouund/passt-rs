@@ -11,6 +11,7 @@ use mio::{Events, Interest, Poll, Token};
 
 use conf::Args;
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
@@ -38,7 +39,11 @@ fn main() -> anyhow::Result<()> {
     let mut events = Events::with_capacity(16);
     info!("starting event loop...");
     loop {
-        poll.poll(&mut events, Some(Duration::from_secs(5)))?;
+        match poll.poll(&mut events, Some(Duration::from_secs(5))) {
+            Ok(_) => {}
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e.into()),
+        }
         for ev in events.iter() {
             let mut conn = if let Some(conn) = conn_map.remove(&ev.token()) {
                 conn
