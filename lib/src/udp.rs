@@ -43,16 +43,19 @@ pub fn tap_udp4_sent(
 ) -> Result<(), UdpError> {
     // packet initialization, then buffer appending stuff
     // this is wrong, i am overriding the dhcp packet's vector
-    let udp_pkt_vec = vec![0u8; MutableUdpPacket::minimum_packet_size()];
+    let udp_pkt_vec = vec![0u8; MutableUdpPacket::minimum_packet_size() + msg.len()];
     let mut udp_packet = MutableUdpPacket::owned(udp_pkt_vec).unwrap();
     udp_packet.set_source(srcport.to_be() as u16);
     udp_packet.set_destination(destport.to_be() as u16);
-    udp_packet.set_payload(&msg); // we didn't set the size of the payload in the udp packet vector. idk if this wil cause issues
+    // we didn't set the size of the payload in the udp packet vector. idk if this wil cause issues
+    // it will yes. this means we are allocating hella memory
+    udp_packet.set_payload(&msg);
     // ammar: udp over ipv4 checksums are optional and passt ignores them.
     // but maybe we can provide a parameter to allow them to be computed
     // udp_packet.set_checksum(val);
 
-    let mut v4_buf = vec![0u8; MutableIpv4Packet::minimum_packet_size()];
+    let mut v4_buf =
+        vec![0u8; MutableIpv4Packet::minimum_packet_size() + udp_packet.packet().len()];
 
     let mut ip_packet = MutableIpv4Packet::new(&mut v4_buf).unwrap();
     ip_packet.set_source(src);
