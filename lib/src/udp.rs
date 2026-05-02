@@ -94,6 +94,7 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
         let response_type = match msg_type {
             MessageType::Discover => {
                 if opts.contains(OptionCode::RapidCommit) {
+                    opts.remove(OptionCode::RapidCommit);
                     MessageType::Ack
                 } else {
                     MessageType::Offer
@@ -110,7 +111,6 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
     dhcp_msg.set_opcode(dhcproto::v4::Opcode::BootReply);
     dhcp_msg.set_yiaddr(conf.ip4.addr);
     dhcp_msg.set_secs(0);
-    dhcp_msg.set_yiaddr(conf.ip4.addr);
     opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST)); // set the prefix to zero
     opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
     opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
