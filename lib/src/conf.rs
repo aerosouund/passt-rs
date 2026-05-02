@@ -109,7 +109,8 @@ pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
     let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet)?.take().unwrap();
 
     let mut conf = Ipv4Conf {
-        guest_gw: Ipv4Addr::from_octets(gatewayv4.try_into().unwrap()),
+        guest_gw: Ipv4Addr::from_octets(gatewayv4.clone().try_into().unwrap()),
+        our_tap_addr: Ipv4Addr::from_octets(gatewayv4.try_into().unwrap()),
         ..Default::default()
     };
     if let IpNet::V4(addrv4) = ipscopes.addr {

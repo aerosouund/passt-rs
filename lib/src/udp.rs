@@ -7,8 +7,9 @@ use dhcproto::v4::{Decoder, DhcpOption, Message, MessageType, OptionCode};
 use dhcproto::{Decodable, Encodable, Encoder};
 use ipnet::Ipv4Net;
 use pnet::packet::ethernet::EtherTypes;
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::{MutablePacket, Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::udp::UdpPacket;
+use pnet::packet::{Packet, ipv4::MutableIpv4Packet, udp::MutableUdpPacket};
 use std::net::Ipv4Addr;
 use thiserror::Error;
 
@@ -33,7 +34,7 @@ pub enum DhcpError {
 }
 
 // todo: add results and errors and handle them
-pub fn tap_udp4_sent(
+pub fn tap_udp4_send(
     conf: &Conf,
     src: Ipv4Addr,
     srcport: i32,
@@ -42,23 +43,43 @@ pub fn tap_udp4_sent(
     msg: Vec<u8>,
 ) -> Result<(), UdpError> {
     // packet initialization, then buffer appending stuff
-    let mut udp_packet = MutableUdpPacket::owned(msg).unwrap();
-    udp_packet.set_source(srcport.to_be() as u16);
-    udp_packet.set_destination(destport.to_be() as u16);
-    // udp_packet.set_checksum(val); // ammar: we need to compute packet checksums
+    // this is wrong, i am overriding the dhcp packet's vector
+    let mut udp_pkt_vec = vec![0u8; MutableUdpPacket::minimum_packet_size() + msg.len()];
 
-    // ammar: need to make sure if actually wrapping the udp packet in an ipv4 packet is needed here
-    // does calling payload return the full packet or just the payload ? according to chatgpt its the whole
-    // packet and in a format the os can handle but i am honestly not convinced
-    let mut ip_packet = MutableIpv4Packet::new(udp_packet.payload_mut()).unwrap();
+    let udp_len = udp_pkt_vec.len();
+    let mut udp_packet = MutableUdpPacket::new(&mut udp_pkt_vec).unwrap();
+    udp_packet.set_source(srcport as u16);
+    udp_packet.set_destination(destport as u16);
+    // we didn't set the size of the payload in the udp packet vector. idk if this wil cause issues
+    // it will yes. this means we are allocating hella memory
+    udp_packet.set_payload(&msg);
+    udp_packet.set_length(udp_len as u16);
+    // ammar: udp over ipv4 checksums are optional and passt ignores them.
+    // but maybe we can provide a parameter to allow them to be computed
+    // udp_packet.set_checksum(val);
+
+    let mut v4_buf =
+        vec![0u8; MutableIpv4Packet::minimum_packet_size() + udp_packet.packet().len()];
+    let v4_len = v4_buf.len();
+
+    let mut ip_packet = MutableIpv4Packet::new(&mut v4_buf).unwrap();
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
+    ip_packet.set_total_length(v4_len as u16);
+    ip_packet.set_version(4);
+    ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+    ip_packet.set_header_length(5);
+    ip_packet.set_ttl(255);
+    ip_packet.set_checksum(0); // zero first
+    let checksum = pnet::packet::ipv4::checksum(&ip_packet.to_immutable());
+    ip_packet.set_checksum(checksum);
+    ip_packet.set_payload(udp_packet.packet());
 
-    send_ether(conf, EtherTypes::Ipv4, ip_packet.payload()).map_err(UdpError::Tap)
+    send_ether(conf, EtherTypes::Ipv4, ip_packet.packet()).map_err(UdpError::Tap)
 }
 
-pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), DhcpError> {
-    let mut dhcp_msg = match Message::decode(&mut Decoder::new(v4packet.payload())) {
+pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
+    let mut dhcp_msg = match Message::decode(&mut Decoder::new(udp_pkt.payload())) {
         Ok(msg) => msg,
         Err(_) => {
             return Err(DhcpError::InvalidPacket);
@@ -77,9 +98,9 @@ pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), Dhc
         let response_type = match msg_type {
             MessageType::Discover => {
                 if opts.contains(OptionCode::RapidCommit) {
-                    MessageType::Offer
-                } else {
                     MessageType::Ack
+                } else {
+                    MessageType::Offer
                 }
             }
             MessageType::Request => MessageType::Ack,
@@ -89,13 +110,21 @@ pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), Dhc
         };
         opts.insert(DhcpOption::MessageType(response_type));
     };
-    let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
 
+    dhcp_msg.set_opcode(dhcproto::v4::Opcode::BootReply);
     dhcp_msg.set_yiaddr(conf.ip4.addr);
-    opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
+    dhcp_msg.set_secs(0);
+    // todo: use the computed mask
+    opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST)); // set the prefix to zero
     opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
     opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
+    opts.insert(DhcpOption::AddressLeaseTime(u32::MAX));
+    opts.remove(OptionCode::ParameterRequestList);
+    opts.remove(OptionCode::ClientIdentifier);
+    opts.remove(OptionCode::Hostname);
+    opts.remove(OptionCode::MaxMessageSize);
 
+    let mask = ((!0u64 << (32 - conf.ip4.prefix_len as u32)) as u32).to_be();
     if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
         opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
             Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
@@ -109,7 +138,6 @@ pub(crate) fn dhcp(conf: &Conf, v4packet: Ipv4Packet<'static>) -> Result<(), Dhc
     let mut enc = Encoder::new(&mut msg_buf);
     dhcp_msg.encode(&mut enc).unwrap();
 
-    // do we build a new packet or use the existing one ?
-    tap_udp4_sent(conf, conf.ip4.our_tap_addr, 67, conf.ip4.addr, 68, msg_buf).unwrap();
+    tap_udp4_send(conf, conf.ip4.our_tap_addr, 67, conf.ip4.addr, 68, msg_buf).unwrap();
     Ok(())
 }

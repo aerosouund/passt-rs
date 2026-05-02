@@ -143,7 +143,7 @@ fn tap_handle_v4(
             // dhcp ? but again, we could send whatever on port 67 but hey
             if udp_packet.get_destination() == 67 {
                 // todo: handle this result
-                let _ = dhcp(conf, v4packet);
+                let _ = dhcp(conf, &udp_packet);
             }
         }
         IpNextHeaderProtocols::Tcp => {}
