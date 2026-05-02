@@ -80,7 +80,7 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
 
     let cs = pnet::util::ipv6_checksum(
         router_adv.packet(),
-        1,
+        1, // skip the offset of the checksum field itself
         &[],
         &conf.ip6.our_tap_ll,
         &dest,

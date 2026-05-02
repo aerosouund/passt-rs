@@ -45,11 +45,10 @@ pub fn tap_udp4_sent(
     let mut udp_packet = MutableUdpPacket::owned(msg).unwrap();
     udp_packet.set_source(srcport.to_be() as u16);
     udp_packet.set_destination(destport.to_be() as u16);
-    // udp_packet.set_checksum(val); // ammar: we need to compute packet checksums
+    // ammar: udp over ipv4 checksums are optional and passt ignores them.
+    // but maybe we can provide a parameter to allow them to be computed
+    // udp_packet.set_checksum(val);
 
-    // ammar: need to make sure if actually wrapping the udp packet in an ipv4 packet is needed here
-    // does calling payload return the full packet or just the payload ? according to chatgpt its the whole
-    // packet and in a format the os can handle but i am honestly not convinced
     let mut ip_packet = MutableIpv4Packet::new(udp_packet.payload_mut()).unwrap();
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
@@ -89,10 +88,12 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
         };
         opts.insert(DhcpOption::MessageType(response_type));
     };
-    let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
+    // let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
+    // shift an all ones 64 by 32 bytes - 0
+    let mask = ((!0u64 << (32 - conf.ip4.prefix_len as u32)) as u32).to_be();
 
     dhcp_msg.set_yiaddr(conf.ip4.addr);
-    opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST));
+    opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST)); // set the prefix to zero
     opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
     opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
 
@@ -109,7 +110,6 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
     let mut enc = Encoder::new(&mut msg_buf);
     dhcp_msg.encode(&mut enc).unwrap();
 
-    // do we build a new packet or use the existing one ?
     tap_udp4_sent(conf, conf.ip4.our_tap_addr, 67, conf.ip4.addr, 68, msg_buf).unwrap();
     Ok(())
 }
