@@ -98,7 +98,6 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
         let response_type = match msg_type {
             MessageType::Discover => {
                 if opts.contains(OptionCode::RapidCommit) {
-                    opts.remove(OptionCode::RapidCommit);
                     MessageType::Ack
                 } else {
                     MessageType::Offer
