@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
 use std::net::Ipv6Addr;
 
+use anyhow::Ok;
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::icmpv6::Icmpv6Types;
@@ -101,5 +102,6 @@ pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError
     v6reply.set_hop_limit(255);
     v6reply.set_payload(router_adv.packet());
 
+    // Ok(())
     send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }
