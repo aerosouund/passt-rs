@@ -56,11 +56,13 @@ pub fn tap_udp4_sent(
 
     let mut v4_buf =
         vec![0u8; MutableIpv4Packet::minimum_packet_size() + udp_packet.packet().len()];
+    let v4_len = v4_buf.len();
 
     let mut ip_packet = MutableIpv4Packet::new(&mut v4_buf).unwrap();
     ip_packet.set_source(src);
     ip_packet.set_destination(dest);
     ip_packet.set_payload(udp_packet.packet());
+    ip_packet.set_total_length(v4_len as u16);
 
     send_ether(conf, EtherTypes::Ipv4, ip_packet.payload()).map_err(UdpError::Tap)
 }
