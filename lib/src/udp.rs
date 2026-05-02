@@ -69,7 +69,7 @@ pub fn tap_udp4_sent(
     ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
     ip_packet.set_payload(udp_packet.packet());
 
-    send_ether(conf, EtherTypes::Ipv4, ip_packet.payload()).map_err(UdpError::Tap)
+    send_ether(conf, EtherTypes::Ipv4, ip_packet.packet()).map_err(UdpError::Tap)
 }
 
 pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
