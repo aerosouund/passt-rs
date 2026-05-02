@@ -109,15 +109,16 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
 
     dhcp_msg.set_opcode(dhcproto::v4::Opcode::BootReply);
     dhcp_msg.set_yiaddr(conf.ip4.addr);
-    // let mask = (!0u32 << (32 - conf.ip4.prefix_len as u32)).to_be();
-    // shift an all ones 64 by 32 bytes - 0
-    let mask = ((!0u64 << (32 - conf.ip4.prefix_len as u32)) as u32).to_be();
-
+    dhcp_msg.set_secs(0);
     dhcp_msg.set_yiaddr(conf.ip4.addr);
     opts.insert(DhcpOption::SubnetMask(Ipv4Addr::BROADCAST)); // set the prefix to zero
     opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
     opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
+    opts.insert(DhcpOption::AddressLeaseTime(u32::MAX));
+    opts.remove(OptionCode::ParameterRequestList);
+    opts.remove(OptionCode::ClientIdentifier);
 
+    let mask = ((!0u64 << (32 - conf.ip4.prefix_len as u32)) as u32).to_be();
     if conf.ip4.guest_gw.to_bits() & mask != conf.ip4.addr.to_bits() & mask {
         opts.insert(DhcpOption::ClasslessStaticRoute(vec![(
             Ipv4Net::new(conf.ip4.guest_gw, 32).unwrap(),
