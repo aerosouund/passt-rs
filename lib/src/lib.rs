@@ -27,6 +27,7 @@ use crate::conf::Conf;
 use crate::icmp::IcmpError;
 
 pub mod conf;
+pub mod dns;
 pub mod flow;
 pub mod fwd;
 pub mod icmp;
