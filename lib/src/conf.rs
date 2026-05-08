@@ -11,7 +11,11 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 
 use crate::netlink::{nl_get_addr, nl_get_default_gw, nl_get_exit_ifi};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{
+    any::Any,
+    error::Error,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
@@ -45,7 +49,15 @@ impl Default for Conf {
 
 impl Conf {
     pub fn init() -> Result<Self, InitConfError> {
-        let ip6conf = ipv6_conf()?;
+        let ip6conf = match ipv6_conf() {
+            Ok(v6) => v6,
+            Err(InitConfError::NetlinkError(NetlinkError::NoGatewayAttribute)) => {
+                Ipv6Conf::default()
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }; // IPv6 gateways inexistence should not panic
         let ip4conf = ipv4_conf()?;
 
         let c = Conf {
