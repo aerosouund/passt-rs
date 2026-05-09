@@ -46,6 +46,7 @@ pub(crate) fn neighbour_advert(
     send_ether(conf, EtherTypes::Ipv6, v6reply.packet()).map_err(IcmpError::Tap)
 }
 
+// todo: we need to also be sending unsolicited router adverts on intervals
 pub(crate) fn router_advert(conf: &Conf, dest: Ipv6Addr) -> Result<(), IcmpError> {
     // build the prefix option
     let mut prefix_opt_data = Vec::with_capacity(32);
