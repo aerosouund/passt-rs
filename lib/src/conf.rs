@@ -47,15 +47,7 @@ impl Default for Conf {
 
 impl Conf {
     pub fn init() -> Result<Self, InitConfError> {
-        let ip6conf = match ipv6_conf() {
-            Ok(v6) => v6,
-            Err(InitConfError::NetlinkError(NetlinkError::NoGatewayAttribute)) => {
-                Ipv6Conf::default()
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        }; // the inexistence of ipv6 default gateways should be recoverable
+        let ip6conf = ipv6_conf()?;
         let ip4conf = ipv4_conf()?;
 
         let c = Conf {
@@ -72,7 +64,7 @@ pub struct Ipv4Conf {
     pub guest_gw: Ipv4Addr,
     pub our_tap_addr: Ipv4Addr,
     pub addr: Ipv4Addr,
-    pub dns: [Ipv4Addr; MAXNS],
+    pub dns: Vec<Ipv4Addr>,
 }
 
 impl Default for Ipv4Conf {
@@ -82,7 +74,7 @@ impl Default for Ipv4Conf {
             guest_gw: GATEWAY_IP,
             our_tap_addr: GATEWAY_IP,
             addr: GUEST_ADDRESS,
-            dns: [Ipv4Addr::UNSPECIFIED; MAXNS],
+            dns: vec![],
         }
     }
 }
@@ -91,12 +83,12 @@ impl Default for Ipv4Conf {
 pub fn ipv6_conf() -> Result<Ipv6Conf, InitConfError> {
     let ifi = nl_get_exit_ifi(RtAddrFamily::Inet6)?;
 
-    let gatewayv6 = nl_get_default_gw(ifi, RtAddrFamily::Inet6)?;
+    let gatewayv6 = nl_get_default_gw(ifi, RtAddrFamily::Inet6).unwrap_or_default();
     let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet6)?.take().unwrap();
 
     let mut conf = Ipv6Conf {
-        guest_gw: Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap()),
-        map_host_loopback: Ipv6Addr::from_octets(gatewayv6.try_into().unwrap()),
+        guest_gw: Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap_or_default()),
+        map_host_loopback: Ipv6Addr::from_octets(gatewayv6.try_into().unwrap_or_default()),
         ..Default::default()
     };
 
@@ -120,12 +112,10 @@ pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
     let gatewayv4 = nl_get_default_gw(ifi, RtAddrFamily::Inet)?;
     let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet)?.take().unwrap();
     let nameservers = get_dns_v4().unwrap_or_default();
-    let mut dns = [Ipv4Addr::UNSPECIFIED; 3];
-    dns[..nameservers.len()].copy_from_slice(&nameservers);
     let mut conf = Ipv4Conf {
         guest_gw: Ipv4Addr::from_octets(gatewayv4.clone().try_into().unwrap()),
         our_tap_addr: Ipv4Addr::from_octets(gatewayv4.try_into().unwrap()),
-        dns,
+        dns: nameservers,
         ..Default::default()
     };
     if let IpNet::V4(addrv4) = ipscopes.addr {
