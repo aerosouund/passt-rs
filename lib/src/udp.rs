@@ -110,7 +110,13 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
         };
         opts.insert(DhcpOption::MessageType(response_type));
     };
-
+    let dns_addrs: Vec<Ipv4Addr> = conf
+        .ip4
+        .dns
+        .iter()
+        .filter(|a| **a != Ipv4Addr::UNSPECIFIED)
+        .copied()
+        .collect();
     dhcp_msg.set_opcode(dhcproto::v4::Opcode::BootReply);
     dhcp_msg.set_yiaddr(conf.ip4.addr);
     dhcp_msg.set_secs(0);
@@ -119,6 +125,9 @@ pub(crate) fn dhcp(conf: &Conf, udp_pkt: &UdpPacket) -> Result<(), DhcpError> {
     opts.insert(DhcpOption::Router(vec![conf.ip4.guest_gw]));
     opts.insert(DhcpOption::ServerIdentifier(conf.ip4.our_tap_addr));
     opts.insert(DhcpOption::AddressLeaseTime(u32::MAX));
+    if !dns_addrs.is_empty() {
+        opts.insert(DhcpOption::DomainNameServer(dns_addrs));
+    }
     opts.remove(OptionCode::ParameterRequestList);
     opts.remove(OptionCode::ClientIdentifier);
     opts.remove(OptionCode::Hostname);

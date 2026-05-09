@@ -11,11 +11,7 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 
 use crate::netlink::{nl_get_addr, nl_get_default_gw, nl_get_exit_ifi};
-use std::{
-    any::Any,
-    error::Error,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
@@ -86,7 +82,7 @@ impl Default for Ipv4Conf {
             guest_gw: GATEWAY_IP,
             our_tap_addr: GATEWAY_IP,
             addr: GUEST_ADDRESS,
-            dns: [Ipv4Addr::from_bits(0); MAXNS],
+            dns: [Ipv4Addr::UNSPECIFIED; MAXNS],
         }
     }
 }
@@ -124,7 +120,7 @@ pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
     let gatewayv4 = nl_get_default_gw(ifi, RtAddrFamily::Inet)?;
     let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet)?.take().unwrap();
     let nameservers = get_dns_v4().unwrap_or_default();
-    let mut dns = [Ipv4Addr::from_bits(0); 3];
+    let mut dns = [Ipv4Addr::UNSPECIFIED; 3];
     dns[..nameservers.len()].copy_from_slice(&nameservers);
     let mut conf = Ipv4Conf {
         guest_gw: Ipv4Addr::from_octets(gatewayv4.clone().try_into().unwrap()),
