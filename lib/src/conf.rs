@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Ammar <aerosound161@gmail.com>
-use crate::netlink::NetlinkError;
+use crate::{dns::get_dns_v4, netlink::NetlinkError};
 use clap::ValueEnum;
 use ipnet::IpNet;
 use log::info;
@@ -15,6 +15,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 const GUEST_ADDRESS: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 1]);
 const GATEWAY_IP: Ipv4Addr = Ipv4Addr::from_octets([169, 254, 2, 2]);
+pub const MAXNS: usize = 3; // maximum nameservers   3 for v4 and 3 for v6
+pub const MAXDNSRCH: usize = 6;
 
 #[derive(Error, Debug)]
 pub enum InitConfError {
@@ -62,6 +64,7 @@ pub struct Ipv4Conf {
     pub guest_gw: Ipv4Addr,
     pub our_tap_addr: Ipv4Addr,
     pub addr: Ipv4Addr,
+    pub dns: Vec<Ipv4Addr>,
 }
 
 impl Default for Ipv4Conf {
@@ -71,6 +74,7 @@ impl Default for Ipv4Conf {
             guest_gw: GATEWAY_IP,
             our_tap_addr: GATEWAY_IP,
             addr: GUEST_ADDRESS,
+            dns: vec![],
         }
     }
 }
@@ -79,12 +83,12 @@ impl Default for Ipv4Conf {
 pub fn ipv6_conf() -> Result<Ipv6Conf, InitConfError> {
     let ifi = nl_get_exit_ifi(RtAddrFamily::Inet6)?;
 
-    let gatewayv6 = nl_get_default_gw(ifi, RtAddrFamily::Inet6)?;
+    let gatewayv6 = nl_get_default_gw(ifi, RtAddrFamily::Inet6).unwrap_or_default();
     let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet6)?.take().unwrap();
 
     let mut conf = Ipv6Conf {
-        guest_gw: Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap()),
-        map_host_loopback: Ipv6Addr::from_octets(gatewayv6.try_into().unwrap()),
+        guest_gw: Ipv6Addr::from_octets(gatewayv6.clone().try_into().unwrap_or_default()),
+        map_host_loopback: Ipv6Addr::from_octets(gatewayv6.try_into().unwrap_or_default()),
         ..Default::default()
     };
 
@@ -107,10 +111,11 @@ pub fn ipv4_conf() -> Result<Ipv4Conf, InitConfError> {
 
     let gatewayv4 = nl_get_default_gw(ifi, RtAddrFamily::Inet)?;
     let ipscopes = nl_get_addr(ifi, RtAddrFamily::Inet)?.take().unwrap();
-
+    let nameservers = get_dns_v4().unwrap_or_default();
     let mut conf = Ipv4Conf {
         guest_gw: Ipv4Addr::from_octets(gatewayv4.clone().try_into().unwrap()),
         our_tap_addr: Ipv4Addr::from_octets(gatewayv4.try_into().unwrap()),
+        dns: nameservers,
         ..Default::default()
     };
     if let IpNet::V4(addrv4) = ipscopes.addr {
@@ -151,6 +156,8 @@ pub struct Ipv6Conf {
     pub guest_gw: Ipv6Addr,
     pub map_host_loopback: Ipv6Addr,
     pub our_tap_ll: Ipv6Addr,
+    // pub dns: [Ipv6Addr; MAXNS], // yeah we can make it dynamic but passt chose 3 at most then 3 it is
+    // pub dns_search: Vec<String>,
 }
 
 impl Default for Ipv6Conf {
